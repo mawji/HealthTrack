@@ -145,6 +145,80 @@ export function Sparkline({
   );
 }
 
+/** Diverging bar chart around a zero baseline — e.g. net kcal surplus/deficit per day. */
+export function SignedBars({
+  values,
+  posColor,
+  negColor,
+  highlight = values.length - 1,
+  height = 56,
+  labels,
+  tipLabels,
+  tipFormat = (v) => v.toLocaleString(),
+}: {
+  values: number[];
+  posColor: string;
+  negColor: string;
+  highlight?: number;
+  height?: number;
+  labels?: string[];
+  tipLabels?: string[];
+  tipFormat?: (v: number) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
+  const labelH = labels ? 16 : 0;
+  const barsH = height - labelH;
+  return (
+    <div className="chart-wrap">
+      {hover !== null && values[hover] != null && (
+        <Tip
+          leftPct={((hover + 0.5) / values.length) * 100}
+          text={`${(tipLabels ?? labels)?.[hover] ? `${(tipLabels ?? labels)![hover]} · ` : ""}${tipFormat(values[hover])}`}
+        />
+      )}
+      <div style={{ display: "flex", gap: 6 }} onMouseLeave={() => setHover(null)}>
+        {values.map((v, i) => {
+          const color = v >= 0 ? posColor : negColor;
+          const mag = `${v === 0 ? 0 : Math.max((Math.abs(v) / maxAbs) * 100, 3)}%`;
+          const bg =
+            i === hover
+              ? `color-mix(in srgb, ${color} 75%, white)`
+              : i === highlight
+                ? color
+                : `color-mix(in srgb, ${color} 28%, transparent)`;
+          const fill = {
+            width: "100%",
+            height: mag,
+            background: bg,
+            transition: "height 0.9s cubic-bezier(0.22,1,0.36,1), background 0.15s",
+          } as const;
+          return (
+            <div
+              key={i}
+              onMouseEnter={() => setHover(i)}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", width: "100%", height: barsH }}>
+                {/* positive half: bar grows down to the zero line */}
+                <div style={{ flex: 1, display: "flex", alignItems: "flex-end" }}>
+                  {v > 0 && <div style={{ ...fill, borderRadius: "6px 6px 0 0" }} />}
+                </div>
+                <div style={{ height: 1, background: "var(--hairline)" }} />
+                {/* negative half: bar grows down from the zero line */}
+                <div style={{ flex: 1, display: "flex", alignItems: "flex-start" }}>
+                  {v < 0 && <div style={{ ...fill, borderRadius: "0 0 6px 6px" }} />}
+                </div>
+              </div>
+              {labels && <span style={{ fontSize: 9.5, color: "var(--ink-faint)", fontWeight: 600, marginTop: 3 }}>{labels[i]}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Tiny bar chart for weekly comparisons, with hover values. */
 export function Bars({
   values,

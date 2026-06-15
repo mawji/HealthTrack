@@ -143,8 +143,8 @@ function buildSeries(records: MedicalRecord[]): Series[] {
 
 function Sparkline({ s }: { s: Series }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const W = 200;
-  const H = 56;
+  const W = 280;
+  const H = 76;
   const PX = 8;
   const PY = 10;
   const vals = s.points.map((p) => p.value);
@@ -251,7 +251,7 @@ function TrendCard({ s }: { s: Series }) {
         {s.refText && <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>ref {s.refText}</span>}
       </div>
       <div className="row" style={{ gap: 10, alignItems: "baseline", marginTop: 4 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: color ?? "var(--ink)" }}>
+        <span style={{ fontSize: 26, fontWeight: 700, color: color ?? "var(--ink)" }}>
           {latest.valueText || latest.value}
         </span>
         <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{s.unit}</span>
@@ -433,7 +433,7 @@ export default function Records() {
   const reportCount = records.filter((r) => r.metrics?.length).length;
 
   return (
-    <main className="page" style={{ maxWidth: 720 }}>
+    <main className="page wide">
       <header className="rise rise-1" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Records.</h1>
         <p className="page-sub">
@@ -554,7 +554,7 @@ export default function Records() {
                   {showAllTrends ? "Key metrics" : `All metrics (${series.length})`}
                 </button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
                 {trendSeries.map((s) => (
                   <TrendCard key={s.key} s={s} />
                 ))}
@@ -579,10 +579,11 @@ export default function Records() {
                         {fmtDate(date)}
                       </span>
                     </div>
+                    <div className="record-grid">
                     {groupRecords.map((r) => {
                       const expanded = expandedRecords[r.id] ?? (recordIndexMap[r.id] === 0);
                       return (
-                        <div key={r.id} className="card" style={{ padding: 16 }}>
+                        <div key={r.id} className={`card${expanded ? " expanded" : ""}`} style={{ padding: 16 }}>
                           <div
                             style={{ cursor: "pointer", userSelect: "none" }}
                             onClick={() => toggleRecord(r.id)}
@@ -662,6 +663,7 @@ export default function Records() {
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 );
               })}

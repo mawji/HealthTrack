@@ -31,7 +31,7 @@ export default function Trends() {
   }, [days]);
 
   return (
-    <main className="page">
+    <main className="page wide">
       <header className="rise rise-1" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Trends.</h1>
         <p className="page-sub">How your body is changing over time.</p>
@@ -154,18 +154,18 @@ function TrendCard({
       <div className="row" style={{ gap: 8, alignItems: "baseline", marginTop: 8 }}>
         {mode === "range" ? (
           <>
-            <span className="display-num" style={{ fontSize: 26 }}>{latest != null ? fmt(latest) : "—"}</span>
-            <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>latest {unit}</span>
+            <span className="display-num" style={{ fontSize: 34 }}>{latest != null ? fmt(latest) : "—"}</span>
+            <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>latest {unit}</span>
           </>
         ) : (
           <>
-            <span className="display-num" style={{ fontSize: 26 }}>{a != null ? fmt(a) : "—"}</span>
-            <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>avg {unit}</span>
+            <span className="display-num" style={{ fontSize: 34 }}>{a != null ? fmt(a) : "—"}</span>
+            <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>avg {unit}</span>
           </>
         )}
       </div>
       <div style={{ marginTop: 8 }}>
-        <Sparkline values={vals} color={color} fill height={52} tipLabels={tipDates} tipFormat={(v) => `${fmt(v)} ${unit}`} />
+        <Sparkline values={vals} color={color} fill height={64} tipLabels={tipDates} tipFormat={(v) => `${fmt(v)} ${unit}`} />
       </div>
     </section>
   );

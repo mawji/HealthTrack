@@ -6,7 +6,7 @@ import GoalBar from "@/components/GoalBar";
 import SleepClock from "@/components/SleepClock";
 import RangeBars from "@/components/RangeBars";
 import Hypnogram from "@/components/Hypnogram";
-import { Sparkline, Bars } from "@/components/Sparkline";
+import { Sparkline, Bars, SignedBars } from "@/components/Sparkline";
 import ThemeToggle from "@/components/ThemeToggle";
 import AvatarMenu from "@/components/AvatarMenu";
 import {
@@ -81,11 +81,14 @@ export default function Daily() {
       .then((j: HealthPayload) => {
         setData(j);
         setServerToday(j.today.date); // the app's "today" in the data timezone
+        loadWater(j.today.date);
       })
       .catch(() => setErr("Could not load health data."));
-    fetch("/api/water").then((r) => r.json()).then(setWater).catch(() => {});
     loadWorkouts();
   }, []);
+
+  const loadWater = (date: string) =>
+    fetch(`/api/water?date=${date}`).then((r) => r.json()).then(setWater).catch(() => {});
 
   async function changeDay(delta: number) {
     if (!data || dayBusy) return;
@@ -95,6 +98,7 @@ export default function Daily() {
     try {
       const res = await fetch(`/api/health?view=today&date=${next}`);
       setData(await res.json());
+      loadWater(next);
     } finally {
       setDayBusy(false);
     }
@@ -112,6 +116,7 @@ export default function Daily() {
       });
       const res = await fetch(`/api/health?view=today&date=${date}`);
       setData(await res.json());
+      loadWater(date);
     } finally {
       setDayBusy(false);
     }
@@ -357,8 +362,7 @@ export default function Daily() {
           </p>
         </section>
 
-        {/* Water (quick-add is a "now" action — only shown on today) */}
-        {isToday && (
+        {/* Water — shown every day; quick-add is a "now" action, so the +/− controls only appear on today. */}
         <section className="card rise rise-3">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div className="card-label">
@@ -379,6 +383,7 @@ export default function Daily() {
                 {water?.glasses ?? 0} of {glassesGoal} glasses
               </p>
             </div>
+            {isToday && (
             <div className="row" style={{ gap: 10 }}>
               <button
                 className="icon-btn"
@@ -399,6 +404,7 @@ export default function Daily() {
                 +
               </button>
             </div>
+            )}
           </div>
           <div className="row" style={{ gap: 5, marginTop: 13 }}>
             {Array.from({ length: glassesGoal }, (_, i) => (
@@ -418,7 +424,6 @@ export default function Daily() {
             ))}
           </div>
         </section>
-        )}
 
         {/* Activity / workouts */}
         <section className="card rise rise-3">
@@ -613,7 +618,14 @@ export default function Daily() {
             </div>
           </div>
           <div style={{ marginTop: 14 }}>
-            <Bars values={data.week.map((d) => d.caloriesOut)} color="var(--food)" labels={weekLabels} height={52} tipFormat={(v) => `${Math.round(v).toLocaleString()} kcal`} />
+            <SignedBars
+              values={data.week.map((d) => d.caloriesIn - d.caloriesOut)}
+              posColor="var(--food)"
+              negColor="var(--activity)"
+              labels={weekLabels}
+              height={64}
+              tipFormat={(v) => `${v > 0 ? "+" : ""}${Math.round(v).toLocaleString()} kcal`}
+            />
           </div>
         </section>
 

@@ -52,15 +52,14 @@ export default function Food() {
   async function onFile(f: File) {
     setError("");
     setAnalysis(null);
-    setNote("");
     // Downscale to keep the vision request small. Hold the photo so the user
-    // can add context before we analyze it.
+    // can add context before we analyze it; any text already typed carries over.
     const dataUrl = await downscale(f, 1024);
     setPreview(dataUrl);
   }
 
   async function analyze() {
-    if (!preview) return;
+    if (!preview && !note.trim()) return;
     setError("");
     setAnalysis(null);
     setAnalyzing(true);
@@ -68,7 +67,7 @@ export default function Food() {
       const res = await fetch("/api/food/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: preview, note: note.trim() || undefined }),
+        body: JSON.stringify({ image: preview ?? undefined, note: note.trim() || undefined }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
@@ -175,6 +174,25 @@ export default function Food() {
                 Gallery
               </button>
             </div>
+            <p style={{ fontSize: 11, color: "var(--ink-faint)", textTransform: "uppercase", letterSpacing: "0.07em", margin: "18px 0 10px" }}>
+              or describe it
+            </p>
+            <textarea
+              className="field"
+              value={note}
+              rows={2}
+              placeholder="e.g. two scrambled eggs on toast with butter"
+              style={{ textAlign: "left", resize: "vertical", minHeight: 56 }}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 10, background: "var(--food)", opacity: note.trim() ? 1 : 0.5 }}
+              disabled={!note.trim()}
+              onClick={analyze}
+            >
+              Analyze description
+            </button>
           </div>
         )}
         {/* capture opens the camera on phones; the plain input opens the gallery/picker */}

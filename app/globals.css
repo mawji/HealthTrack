@@ -104,6 +104,14 @@ main.page {
   display: none;
 }
 
+/* Record cards: one column on mobile, packed grid on desktop. */
+.record-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
 /* avatar: brand-bars version on mobile, classic circle on desktop */
 .avatar-circle {
   display: none !important;
@@ -141,6 +149,10 @@ main.page {
     max-width: 1120px;
     margin: 0;
     padding: 38px 44px 80px;
+  }
+  /* Data-dense pages (Trends, Records) earn the full canvas. */
+  main.page.wide {
+    max-width: 1320px;
   }
   /* two-column card flow on wide screens */
   .desk-grid {
@@ -555,5 +567,12 @@ select.field:focus {
     grid-template-columns: 1fr 1fr;
     gap: 18px;
     align-items: stretch;
+  }
+  .record-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+  /* An open record gets two columns so its lab table has room to breathe. */
+  .record-grid > .card.expanded {
+    grid-column: span 2;
   }
 }

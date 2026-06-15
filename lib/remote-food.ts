@@ -63,10 +63,19 @@ export async function fillRemoteGl(remote: RemoteFoodEntry[]): Promise<void> {
  * Google Health isn't connected or the fetch fails.
  */
 export async function getRemoteMeals(local: FoodEntry[], days = 7): Promise<RemoteFoodEntry[]> {
+  const end = localDateStr();
+  return getRemoteMealsRange(local, addDays(end, -(days - 1)), end);
+}
+
+/** As getRemoteMeals, but over an explicit [start, endInclusive] date range. */
+export async function getRemoteMealsRange(
+  local: FoodEntry[],
+  start: string,
+  endInclusive: string
+): Promise<RemoteFoodEntry[]> {
   if (!isConnected()) return [];
   try {
-    const end = localDateStr();
-    const all = await fetchRemoteFood(addDays(end, -(days - 1)), end);
+    const all = await fetchRemoteFood(start, endInclusive);
     // Drop API copies of meals this app logged itself. Primary match is the
     // dataPoint resource name recorded at sync time; the name+kcal+date key
     // covers entries synced before googleName was stored.

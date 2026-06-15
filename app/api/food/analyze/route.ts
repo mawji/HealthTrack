@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { complete, hasAiKey, parseJsonReply } from "@/lib/openrouter";
 import { FoodAnalysis } from "@/lib/types";
 
-const PROMPT = `You are a nutrition analyst. Look at this photo of food and estimate what it is and its nutritional content for the full visible portion.
-
-Reply with ONLY a JSON object, no prose:
+const JSON_SHAPE = `Reply with ONLY a JSON object, no prose:
 {
   "name": "short dish name",
   "calories": <integer kcal>,
@@ -19,33 +17,44 @@ Reply with ONLY a JSON object, no prose:
 export async function POST(req: NextRequest) {
   if (!hasAiKey()) {
     return NextResponse.json(
-      { error: "Connect an AI provider in Settings to analyze food photos." },
+      { error: "Connect an AI provider in Settings to analyze food." },
       { status: 400 }
     );
   }
-  const { image, note } = await req.json(); // data URL: "data:image/jpeg;base64,..."
-  if (!image?.startsWith("data:image/")) {
-    return NextResponse.json({ error: "Send { image: dataUrl }" }, { status: 400 });
+  const { image, note } = await req.json(); // image: "data:image/jpeg;base64,..."
+  const hasImage = typeof image === "string" && image.startsWith("data:image/");
+  const description = typeof note === "string" ? note.trim() : "";
+  if (!hasImage && !description) {
+    return NextResponse.json({ error: "Send a photo or a description." }, { status: 400 });
   }
 
-  // Optional user-supplied context (dish name, ingredients, portion size, etc.)
-  // to anchor the estimate when the photo alone is ambiguous.
-  const context = typeof note === "string" && note.trim()
-    ? `\n\nThe person who ate this added these details — treat them as authoritative and prefer them over what the photo alone suggests:\n"""${note.trim()}"""`
-    : "";
+  let prompt: string;
+  if (hasImage) {
+    prompt = `You are a nutrition analyst. Look at this photo of food and estimate what it is and its nutritional content for the full visible portion.\n\n${JSON_SHAPE}`;
+    // Optional user-supplied context (dish name, ingredients, portion size) to
+    // anchor the estimate when the photo alone is ambiguous.
+    if (description) {
+      prompt += `\n\nThe person who ate this added these details — treat them as authoritative and prefer them over what the photo alone suggests:\n"""${description}"""`;
+    }
+  } else {
+    // Text-only: the description is the meal. No photo to look at.
+    prompt = `You are a nutrition analyst. Estimate the nutritional content of the meal described below for the full portion. If a portion size isn't given, assume one typical serving and say so in the notes.\n\nThe meal:\n"""${description}"""\n\n${JSON_SHAPE}`;
+  }
 
   try {
     const reply = await complete(
       [
         {
           role: "user",
-          content: [
-            { type: "text", text: PROMPT + context },
-            { type: "image_url", image_url: { url: image } },
-          ],
+          content: hasImage
+            ? [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: image } },
+              ]
+            : prompt,
         },
       ],
-      { vision: true }
+      { vision: hasImage }
     );
     const analysis = parseJsonReply<FoodAnalysis>(reply);
     return NextResponse.json(analysis);

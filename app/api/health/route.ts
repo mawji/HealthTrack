@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDay, getRecentDays, getTrends } from "@/lib/context";
+import { getRemoteMealsRange } from "@/lib/remote-food";
+import { getArchivedNutrition, upsertNutrition, isSettledDate } from "@/lib/archive";
+import { isConnected } from "@/lib/googlehealth";
 import { demoTrends } from "@/lib/demo";
 import { readJson, localDateStr } from "@/lib/store";
 import { FoodEntry, HealthPayload, TrendPoint, TrendsPayload } from "@/lib/types";
@@ -10,40 +13,99 @@ function dateKey(offset = 0) {
   return localDateStr(d);
 }
 
+/** Step a yyyy-MM-dd civil date by n days (noon-anchored to dodge DST). */
+function addDaysStr(date: string, n: number): string {
+  const d = new Date(date + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+type Field = "p" | "c" | "f" | "gl";
+type DayTotals = { p: number | null; c: number | null; f: number | null; gl: number | null };
+
+function addTo(map: Map<string, DayTotals>, key: string, field: Field, v: number | null | undefined) {
+  if (v == null) return;
+  const t = map.get(key) ?? { p: null, c: null, f: null, gl: null };
+  t[field] = (t[field] ?? 0) + v;
+  map.set(key, t);
+}
+function foldMeal(map: Map<string, DayTotals>, key: string, m: { proteinG?: number | null; carbsG?: number | null; fatG?: number | null; glycemicLoad?: number | null }) {
+  addTo(map, key, "p", m.proteinG);
+  addTo(map, key, "c", m.carbsG);
+  addTo(map, key, "f", m.fatG);
+  addTo(map, key, "gl", m.glycemicLoad);
+}
+function foldTotals(map: Map<string, DayTotals>, key: string, t: DayTotals) {
+  addTo(map, key, "p", t.p);
+  addTo(map, key, "c", t.c);
+  addTo(map, key, "f", t.f);
+  addTo(map, key, "gl", t.gl);
+}
+
 /**
- * Daily macro + glycemic-load totals from the local food log. The Google
- * Health rollup doesn't expose macro sums, so these series cover app-logged
- * meals only; days with nothing logged become gaps (null).
+ * Daily macro + glycemic-load totals, combining app-logged meals (food-log.json)
+ * with meals synced back from Google Health — the same set shown in the food
+ * log. Each macro stays null until a meal that day actually carries it, so days
+ * with no data (or meals lacking macros) become gaps rather than zeros.
+ *
+ * Local-log macros are cheap and always recomputed live. Synced (remote) meals
+ * cost a Google Health fetch + AI GL estimation, so settled days are cached in
+ * the archive (nutrition_days): we read those and fetch only the unsettled tail.
  */
-function nutritionSeries(days: number): Pick<TrendsPayload, "proteinG" | "carbsG" | "fatG" | "glycemicLoad"> {
+async function nutritionSeries(days: number): Promise<Pick<TrendsPayload, "proteinG" | "carbsG" | "fatG" | "glycemicLoad">> {
   const foods = readJson<FoodEntry[]>("food-log.json", []);
-  type DayTotals = { p: number; c: number; f: number; gl: number | null };
   const totals = new Map<string, DayTotals>();
-  for (const f of foods) {
-    const key = localDateStr(new Date(f.loggedAt));
-    const t = totals.get(key) ?? { p: 0, c: 0, f: 0, gl: null };
-    t.p += f.proteinG;
-    t.c += f.carbsG;
-    t.f += f.fatG;
-    // GL stays null until at least one entry that day carries an estimate
-    // (entries logged before GL support don't have one).
-    if (f.glycemicLoad != null) t.gl = (t.gl ?? 0) + f.glycemicLoad;
-    totals.set(key, t);
+  for (const f of foods) foldMeal(totals, localDateStr(new Date(f.loggedAt)), f);
+
+  if (isConnected()) {
+    const end = dateKey(0);
+    const start = dateKey(days - 1);
+    // Settled days come straight from the archive (synced-meal totals, deduped
+    // against the local log when they were stored).
+    const archived = getArchivedNutrition(start, end);
+    for (const [date, t] of archived) foldTotals(totals, date, t);
+
+    // Live window: from the first date not yet covered by a settled archive row
+    // through today. After backfill this is just the unsettled tail (~4 days).
+    let liveStart = end;
+    for (let d = start; d <= end; d = addDaysStr(d, 1)) {
+      if (!(archived.has(d) && isSettledDate(d))) {
+        liveStart = d;
+        break;
+      }
+      liveStart = addDaysStr(d, 1);
+    }
+
+    if (liveStart <= end) {
+      try {
+        const remote = await getRemoteMealsRange(foods, liveStart, end);
+        const live = new Map<string, DayTotals>();
+        for (const r of remote) foldMeal(live, localDateStr(new Date(r.at)), r);
+        for (let d = liveStart; d <= end; d = addDaysStr(d, 1)) {
+          const t = live.get(d);
+          if (t) foldTotals(totals, d, t);
+          // Persist newly-settled days (even empty ones) so we never refetch them.
+          if (isSettledDate(d)) upsertNutrition(d, t ?? { p: null, c: null, f: null, gl: null });
+        }
+      } catch (e) {
+        console.error("Remote nutrition fetch failed:", e);
+      }
+    }
   }
-  const series = (get: (t: DayTotals) => number | null): TrendPoint[] => {
+
+  const series = (field: Field): TrendPoint[] => {
     const pts: TrendPoint[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const date = dateKey(i);
-      const t = totals.get(date);
-      pts.push({ date, value: t ? get(t) : null });
+      pts.push({ date, value: totals.get(date)?.[field] ?? null });
     }
     return pts;
   };
   return {
-    proteinG: series((t) => t.p),
-    carbsG: series((t) => t.c),
-    fatG: series((t) => t.f),
-    glycemicLoad: series((t) => t.gl),
+    proteinG: series("p"),
+    carbsG: series("c"),
+    fatG: series("f"),
+    glycemicLoad: series("gl"),
   };
 }
 
@@ -60,7 +122,7 @@ export async function GET(req: NextRequest) {
     }
     // Nutrition series come from the local food log, so they apply to the
     // demo payload too — logged meals are real either way.
-    return NextResponse.json({ ...(trends ?? demoTrends(days)), ...nutritionSeries(days) });
+    return NextResponse.json({ ...(trends ?? demoTrends(days)), ...(await nutritionSeries(days)) });
   }
 
   // Default: the requested day (today if unspecified) + last 7 days.

@@ -11,18 +11,19 @@ import { WaterEntry } from "@/lib/types";
 const FILE = "water-log.json";
 const GLASS_ML = 250;
 
-function todayEntries(): WaterEntry[] {
+function entriesForDate(date: string): WaterEntry[] {
   const all = readJson<WaterEntry[]>(FILE, []);
-  const today = localDateStr();
-  return all.filter((e) => localDateStr(new Date(e.at)) === today);
+  return all.filter((e) => localDateStr(new Date(e.at)) === date);
 }
 
-async function total(): Promise<{ ml: number; glasses: number; synced: boolean }> {
-  const local = todayEntries();
+const todayEntries = (): WaterEntry[] => entriesForDate(localDateStr());
+
+async function total(date = localDateStr()): Promise<{ ml: number; glasses: number; synced: boolean }> {
+  const local = entriesForDate(date);
   // Synced entries come back inside the API total; unsynced ones don't.
   const unsyncedMl = local.filter((e) => !e.googleName).reduce((a, e) => a + e.ml, 0);
   if (isConnected()) {
-    const remote = await fetchWaterTotal(localDateStr());
+    const remote = await fetchWaterTotal(date);
     if (remote !== null) {
       const ml = remote + unsyncedMl;
       return { ml, glasses: Math.round(ml / GLASS_ML), synced: true };
@@ -32,8 +33,9 @@ async function total(): Promise<{ ml: number; glasses: number; synced: boolean }
   return { ml, glasses: Math.round(ml / GLASS_ML), synced: false };
 }
 
-export async function GET() {
-  return NextResponse.json(await total());
+export async function GET(req: NextRequest) {
+  const date = req.nextUrl.searchParams.get("date") || undefined;
+  return NextResponse.json(await total(date));
 }
 
 export async function POST(req: NextRequest) {

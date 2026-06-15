@@ -47,6 +47,18 @@ function getDb(): Database.Database {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    -- Per-day macro + GL totals for meals synced from Google Health, deduped
+    -- against the local food log. Only settled days are stored (their meals are
+    -- final), so trends serve them from here instead of refetching the API +
+    -- re-estimating GL. Local-log macros are cheap and always recomputed live.
+    CREATE TABLE IF NOT EXISTS nutrition_days (
+      date       TEXT PRIMARY KEY,
+      protein_g  REAL,
+      carbs_g    REAL,
+      fat_g      REAL,
+      gl         REAL,
+      fetched_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -131,6 +143,49 @@ export function upsertDay(
       });
   } catch (e) {
     console.error("Archive write failed:", e);
+  }
+}
+
+// -- Nutrition (remote macro totals) ------------------------------
+
+/** Per-day totals of macros + GL from synced (Google Health) meals. */
+export interface NutritionTotals {
+  p: number | null;
+  c: number | null;
+  f: number | null;
+  gl: number | null;
+}
+
+export function getArchivedNutrition(start: string, endInclusive: string): Map<string, NutritionTotals> {
+  const out = new Map<string, NutritionTotals>();
+  try {
+    const rows = getDb()
+      .prepare("SELECT * FROM nutrition_days WHERE date >= ? AND date <= ?")
+      .all(start, endInclusive) as any[];
+    for (const r of rows) out.set(r.date, { p: r.protein_g, c: r.carbs_g, f: r.fat_g, gl: r.gl });
+  } catch (e) {
+    console.error("Nutrition archive read failed:", e);
+  }
+  return out;
+}
+
+/** Store one settled day's synced-meal totals (null fields stay null). */
+export function upsertNutrition(date: string, t: NutritionTotals) {
+  try {
+    getDb()
+      .prepare(
+        `INSERT INTO nutrition_days (date, protein_g, carbs_g, fat_g, gl, fetched_at)
+         VALUES (@date, @p, @c, @f, @gl, @fetchedAt)
+         ON CONFLICT(date) DO UPDATE SET
+           protein_g  = excluded.protein_g,
+           carbs_g    = excluded.carbs_g,
+           fat_g      = excluded.fat_g,
+           gl         = excluded.gl,
+           fetched_at = excluded.fetched_at`
+      )
+      .run({ date, p: t.p, c: t.c, f: t.f, gl: t.gl, fetchedAt: new Date().toISOString() });
+  } catch (e) {
+    console.error("Nutrition archive write failed:", e);
   }
 }
 

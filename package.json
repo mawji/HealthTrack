@@ -1,0 +1,36 @@
+{
+  "name": "healthtrack",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "next dev -p 3210 -H 127.0.0.1",
+    "dev:lan": "next dev -p 3210 -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -p 3210 -H 127.0.0.1",
+    "start:lan": "next start -p 3210 -H 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "preflight": "node scripts/preflight.mjs",
+    "update": "node scripts/update.mjs",
+    "backup:data": "node scripts/backup-data.mjs",
+    "export:public": "node scripts/export-public.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "next": "^15.3.0",
+    "pdf-parse": "^1.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

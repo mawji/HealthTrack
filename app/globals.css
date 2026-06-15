@@ -1,0 +1,559 @@
+/* ── HealthTrack design system v2: "midnight vitals" ────────────
+   Dark-first. Near-black ground, luminous per-domain accents,
+   Fraunces display numerals + Instrument Sans UI. Light mode via
+   [data-theme="light"]. Desktop gets a sidebar + 2-column grid. */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0b0d0f;
+  --bg-raised: #15181c;
+  --bg-inset: #101317;
+  --ink: #edece6;
+  --ink-soft: #a2a89f;
+  --ink-faint: #5f665f;
+  --hairline: #232a31;
+
+  --activity: #3dd68c;
+  --heart: #ff6f61;
+  --sleep: #94a1f2;
+  --food: #f0b25a;
+  --breath: #56c8d8;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --grain: rgba(255, 255, 255, 0.025);
+  --nav-bg: rgba(21, 24, 28, 0.92);
+  --nav-ink: #edece6;
+}
+
+:root[data-theme="light"] {
+  --bg: #faf7f2;
+  --bg-raised: #ffffff;
+  --bg-inset: #f3efe8;
+  --ink: #211f1a;
+  --ink-soft: #6f6a5e;
+  --ink-faint: #a8a294;
+  --hairline: #eae4d9;
+
+  --activity: #2e8f5c;
+  --heart: #e25c4a;
+  --sleep: #5b6abf;
+  --food: #c98a2b;
+  --breath: #3a93a3;
+
+  --shadow: 0 1px 2px rgba(60, 50, 30, 0.04), 0 8px 28px rgba(60, 50, 30, 0.07);
+  --grain: rgba(120, 100, 60, 0.035);
+  --nav-bg: rgba(33, 31, 26, 0.92);
+  --nav-ink: #faf7f2;
+}
+
+:root {
+  /* soft tints derived from the accents so both themes stay in tune */
+  --activity-soft: color-mix(in srgb, var(--activity) 16%, var(--bg-raised));
+  --heart-soft: color-mix(in srgb, var(--heart) 16%, var(--bg-raised));
+  --sleep-soft: color-mix(in srgb, var(--sleep) 16%, var(--bg-raised));
+  --food-soft: color-mix(in srgb, var(--food) 16%, var(--bg-raised));
+  --breath-soft: color-mix(in srgb, var(--breath) 16%, var(--bg-raised));
+
+  --radius: 22px;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-ui: var(--font-instrument), system-ui, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(var(--grain) 1px, transparent 1px);
+  background-size: 22px 22px;
+  transition: background-color 0.35s, color 0.35s;
+}
+
+/* ── App shell: sidebar on desktop, bottom nav on mobile ── */
+.shell {
+  display: flex;
+  min-height: 100dvh;
+}
+
+aside.sidebar {
+  display: none;
+}
+
+main.page {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px 18px 120px;
+  min-height: 100dvh;
+}
+
+/* visible only on desktop (sidebar breakpoint) */
+.desk-only {
+  display: none;
+}
+
+/* avatar: brand-bars version on mobile, classic circle on desktop */
+.avatar-circle {
+  display: none !important;
+}
+@media (min-width: 900px) {
+  .avatar-bars {
+    display: none !important;
+  }
+  .avatar-circle {
+    display: flex !important;
+  }
+}
+
+@media (min-width: 900px) {
+  aside.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 232px;
+    flex: none;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    padding: 30px 16px 24px;
+    border-right: 1px solid var(--hairline);
+    background: color-mix(in srgb, var(--bg-raised) 45%, var(--bg));
+  }
+  nav.bottom-nav {
+    display: none;
+  }
+  .desk-only {
+    display: inline-flex;
+  }
+  main.page {
+    max-width: 1120px;
+    margin: 0;
+    padding: 38px 44px 80px;
+  }
+  /* two-column card flow on wide screens */
+  .desk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    align-items: stretch;
+  }
+  .desk-span {
+    grid-column: 1 / -1;
+  }
+}
+
+/* sidebar internals */
+.sidebar .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  padding: 0 10px 18px;
+}
+.sidebar .wordmark span {
+  color: var(--heart);
+}
+.sidebar a.side-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.2s, color 0.2s;
+}
+.sidebar a.side-link:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.sidebar a.side-link.active {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.sidebar .side-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.sidebar .side-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.sidebar .side-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Typography ── */
+h1.page-title {
+  font-family: var(--font-display);
+  font-weight: 560;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.page-sub {
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  margin-top: 4px;
+}
+/* Numbers read clean and instrument-like; the serif stays for page titles. */
+.display-num {
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.section-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 10px 2px 0;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  transition: background-color 0.35s, border-color 0.35s;
+}
+
+.card-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.card-label .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* ── Load animation: staggered rise ── */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rise-1 { animation-delay: 0.05s; }
+.rise-2 { animation-delay: 0.12s; }
+.rise-3 { animation-delay: 0.19s; }
+.rise-4 { animation-delay: 0.26s; }
+.rise-5 { animation-delay: 0.33s; }
+.rise-6 { animation-delay: 0.4s; }
+
+/* ── ECG draw-in ── */
+@keyframes dash {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.ecg-path {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: dash 2.2s ease-out 0.4s forwards;
+}
+
+/* ── Range bars grow-in (heart chart) ── */
+@keyframes grow-bar {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.range-bar {
+  transform-origin: center bottom;
+  animation: grow-bar 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Progress fill sweep ── */
+@keyframes sweep {
+  from {
+    width: 0;
+  }
+}
+.bar-fill {
+  animation: sweep 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.25s;
+}
+
+/* ── Breathing orb (coach page) ── */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+.orb {
+  animation: breathe 5s ease-in-out infinite;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.pulsing { animation: pulse-soft 1.4s ease-in-out infinite; }
+
+/* ── Bottom navigation: floating pill (mobile) ── */
+nav.bottom-nav {
+  position: fixed;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  background: var(--nav-bg);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 6px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+nav.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: color-mix(in srgb, var(--nav-ink) 60%, transparent);
+  text-decoration: none;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  /* wide enough that the active pill reads as a circle, not an oval */
+  padding: 7px 12px;
+  min-width: 56px;
+  border-radius: 999px;
+  transition: background 0.25s, color 0.25s;
+}
+nav.bottom-nav a svg {
+  width: 21px;
+  height: 21px;
+}
+nav.bottom-nav a.active {
+  color: var(--nav-ink);
+  background: color-mix(in srgb, var(--nav-ink) 14%, transparent);
+}
+
+/* ── Buttons & inputs ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 13px 22px;
+  cursor: pointer;
+  background: var(--ink);
+  color: var(--bg);
+  transition: transform 0.15s, opacity 0.2s;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--bg-raised);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.icon-btn:active {
+  transform: scale(0.92);
+}
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+input.field,
+textarea.field,
+select.field {
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--bg-inset);
+  color: var(--ink);
+  outline: none;
+}
+input.field:focus,
+textarea.field:focus,
+select.field:focus {
+  border-color: var(--ink-faint);
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 11px;
+}
+
+/* ── Streak dots (Google Health "recent activities" row) ── */
+.streak-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+.streak-day .day-letter {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+.streak-day.today .day-letter {
+  color: var(--ink);
+}
+.streak-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-inset);
+  border: 1.5px solid var(--hairline);
+  color: var(--ink-faint);
+  transition: all 0.3s;
+}
+.streak-dot svg {
+  width: 16px;
+  height: 16px;
+}
+.streak-dot.hit {
+  background: var(--activity);
+  border-color: var(--activity);
+  color: var(--bg);
+}
+.streak-day.today .streak-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--activity) 35%, transparent);
+}
+
+/* ── Chart hover tooltips ── */
+.chart-wrap {
+  position: relative;
+}
+.chart-tip {
+  position: absolute;
+  top: -6px;
+  transform: translate(-50%, -100%);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 7px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: var(--shadow);
+}
+
+/* ── Misc layout helpers ── */
+.row {
+  display: flex;
+  align-items: center;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--food) 35%, transparent);
+}
+
+/* ── Desktop overrides (last so they beat same-specificity base rules) ── */
+@media (min-width: 900px) {
+  nav.bottom-nav {
+    display: none;
+  }
+  .stack.desk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    align-items: stretch;
+  }
+}

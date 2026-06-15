@@ -1,0 +1,19 @@
+node_modules/
+.next/
+out/
+data/
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+
+# Background-run logs
+logs/
+
+# Local backups produced by scripts/backup-data.mjs
+backups/
+
+# CodeGraph index (machine-local)
+.codegraph/
+
+# Playwright MCP scratch output (console logs + page snapshots)
+.playwright-mcp/

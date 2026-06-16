@@ -91,6 +91,82 @@ export const ForkIcon = (
   </svg>
 );
 
+// ── Habit icon set ─────────────────────────────────────────────────────────
+// Extra glyphs for user-defined habits. Stored data only ever references a
+// stable string key (never raw SVG/HTML) — HABIT_ICONS maps keys to nodes.
+
+export const BookIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5z" />
+    <path d="M20 5.5C20 4.7 19.3 4 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z" />
+  </svg>
+);
+
+export const CoffeeIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M5 8h12v5a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5z" />
+    <path d="M17 9h1.5a2.5 2.5 0 0 1 0 5H17" />
+    <path d="M8 3.5c-.5.7-.5 1.3 0 2M11.5 3.5c-.5.7-.5 1.3 0 2" />
+    <path d="M4 21h14" />
+  </svg>
+);
+
+export const MeditateIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <circle cx="12" cy="5.5" r="2" />
+    <path d="M12 8v4" />
+    <path d="M12 12c-2 0-5 1.2-6.5 2.5L8 17M12 12c2 0 5 1.2 6.5 2.5L16 17" />
+    <path d="M7 20l5-3 5 3" />
+  </svg>
+);
+
+export const LeafIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M5 19c0-8 6-13 14-13 0 8-5 14-13 14a6 6 0 0 1-1-1z" />
+    <path d="M9 15c2.5-2.5 5-4 8-5" />
+  </svg>
+);
+
+export const NoEntryIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M6.5 6.5l11 11" />
+  </svg>
+);
+
+export const CheckCircleIcon = (
+  <svg viewBox="0 0 24 24" {...S}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M8.5 12.2l2.4 2.4 4.6-5" />
+  </svg>
+);
+
+/** Stable key → habit icon node. Keys are the only thing stored in data. */
+export const HABIT_ICONS: Record<string, React.ReactNode> = {
+  check: CheckCircleIcon,
+  book: BookIcon,
+  coffee: CoffeeIcon,
+  moon: MoonIcon,
+  dumbbell: DumbbellIcon,
+  heart: HeartIcon,
+  water: DropIcon,
+  walk: RunIcon,
+  meditate: MeditateIcon,
+  leaf: LeafIcon,
+  flame: FlameIcon,
+  scale: ScaleIcon,
+  pulse: PulseIcon,
+  fork: ForkIcon,
+  steps: StepsIcon,
+  "no-entry": NoEntryIcon,
+};
+
+export const HABIT_ICON_KEYS = Object.keys(HABIT_ICONS);
+
+export function habitIcon(key: string): React.ReactNode {
+  return HABIT_ICONS[key] ?? HABIT_ICONS.check;
+}
+
 /** Tinted rounded chip wrapping a metric icon (Apple Health category style). */
 export function IconChip({ icon, color, size = 26 }: { icon: React.ReactNode; color: string; size?: number }) {
   return (
@@ -111,6 +187,20 @@ export function IconChip({ icon, color, size = 26 }: { icon: React.ReactNode; co
       <span style={{ width: size * 0.62, height: size * 0.62, display: "flex" }}>{icon}</span>
     </span>
   );
+}
+
+/** Human-facing label for a workout's kind. Google often returns a generic
+ *  "Workout" displayName while the real activity lives in exerciseType
+ *  (e.g. LACROSSE) — prefer the specific type in that case so the list shows
+ *  what the session actually was. */
+export function workoutLabel(w: { name?: string; exerciseType?: string }): string {
+  const type =
+    w.exerciseType && w.exerciseType.toUpperCase() !== "WORKOUT"
+      ? w.exerciseType.replace(/_/g, " ").toLowerCase()
+      : null;
+  const name = w.name?.trim();
+  if (name && !/^workout$/i.test(name)) return name;
+  return type ?? name ?? "Workout";
 }
 
 /** Picks a workout icon by exercise type keyword. */

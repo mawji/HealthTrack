@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDay, getRecentDays, getTrends } from "@/lib/context";
 import { getRemoteMealsRange } from "@/lib/remote-food";
-import { getArchivedNutrition, upsertNutrition, isSettledDate } from "@/lib/archive";
-import { isConnected } from "@/lib/googlehealth";
-import { demoTrends } from "@/lib/demo";
+import { getArchivedNutrition, upsertNutrition, isSettledDate, getArchivedWorkouts } from "@/lib/archive";
+import { isConnected, fetchWorkouts } from "@/lib/googlehealth";
+import { demoTrends, demoWorkouts } from "@/lib/demo";
 import { readJson, localDateStr } from "@/lib/store";
-import { FoodEntry, HealthPayload, TrendPoint, TrendsPayload } from "@/lib/types";
+import { FoodEntry, HealthPayload, TrendPoint, TrendsPayload, WaterEntry, WorkoutSession } from "@/lib/types";
 
 function dateKey(offset = 0) {
   const d = new Date();
@@ -109,6 +109,80 @@ async function nutritionSeries(days: number): Promise<Pick<TrendsPayload, "prote
   };
 }
 
+/** Fill a trailing-day series (oldest→newest) from a date→value map. */
+function fillSeries(days: number, byDate: Map<string, number>): TrendPoint[] {
+  const pts: TrendPoint[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const date = dateKey(i);
+    pts.push({ date, value: byDate.get(date) ?? null });
+  }
+  return pts;
+}
+
+/**
+ * Daily hydration totals (ml) from the local water log — app-logged glasses are
+ * stored locally with their ml regardless of Google Health sync, so summing the
+ * log gives a complete app-logged series with no per-day remote fetches.
+ */
+function waterSeries(days: number): Pick<TrendsPayload, "water"> {
+  const byDate = new Map<string, number>();
+  for (const e of readJson<WaterEntry[]>("water-log.json", [])) {
+    const d = localDateStr(new Date(e.at));
+    byDate.set(d, (byDate.get(d) ?? 0) + e.ml);
+  }
+  return { water: fillSeries(days, byDate) };
+}
+
+/**
+ * Logged workout minutes per day, combining the local journal, settled archived
+ * workouts, and a live fetch of the unsettled tail (same archive/live split as
+ * nutrition). Deduped by googleName so synced sessions aren't counted twice.
+ */
+async function workoutSeries(days: number): Promise<Pick<TrendsPayload, "workoutMin">> {
+  const end = dateKey(0);
+  const start = dateKey(days - 1);
+
+  const sessions: WorkoutSession[] = readJson<WorkoutSession[]>("workout-journal.json", []).filter(
+    (w) => w.date >= start && w.date <= end
+  );
+  const seen = new Set(sessions.map((w) => w.googleName).filter(Boolean));
+  const add = (list: WorkoutSession[]) => {
+    for (const w of list) {
+      if (w.googleName && seen.has(w.googleName)) continue;
+      if (w.googleName) seen.add(w.googleName);
+      sessions.push(w);
+    }
+  };
+
+  if (isConnected()) {
+    add(getArchivedWorkouts(start, end));
+    // Live window: from the first unsettled day in range through today.
+    let tailStart: string | null = null;
+    for (let d = start; d <= end; d = addDaysStr(d, 1)) {
+      if (!isSettledDate(d)) {
+        tailStart = d;
+        break;
+      }
+    }
+    if (tailStart) {
+      try {
+        add(await fetchWorkouts(tailStart, end));
+      } catch (e) {
+        console.error("Workout trend fetch failed:", e);
+      }
+    }
+  } else {
+    add(demoWorkouts(days));
+  }
+
+  const byDate = new Map<string, number>();
+  for (const w of sessions) {
+    if (w.date < start || w.date > end) continue;
+    byDate.set(w.date, (byDate.get(w.date) ?? 0) + (w.durationMin || 0));
+  }
+  return { workoutMin: fillSeries(days, byDate) };
+}
+
 export async function GET(req: NextRequest) {
   const view = req.nextUrl.searchParams.get("view") ?? "today";
 
@@ -122,7 +196,12 @@ export async function GET(req: NextRequest) {
     }
     // Nutrition series come from the local food log, so they apply to the
     // demo payload too — logged meals are real either way.
-    return NextResponse.json({ ...(trends ?? demoTrends(days)), ...(await nutritionSeries(days)) });
+    return NextResponse.json({
+      ...(trends ?? demoTrends(days)),
+      ...(await nutritionSeries(days)),
+      ...waterSeries(days),
+      ...(await workoutSeries(days)),
+    });
   }
 
   // Default: the requested day (today if unspecified) + last 7 days.

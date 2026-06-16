@@ -23,7 +23,15 @@ import {
   RemoteFoodEntry,
   TrendsPayload,
   WorkoutSession,
+  WorkoutDetail,
 } from "./types";
+import { formatDetail } from "./workout-detail";
+import {
+  getHabitDefinitions,
+  getHabitRecords,
+  computeHabitStatus,
+  formatHabitForCoach,
+} from "./habits";
 
 /** A meal normalized across the local log and Google Health for the coach. */
 type CoachMeal = {
@@ -203,8 +211,12 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     const journal = readJson<WorkoutSession[]>("workout-journal.json", []);
     const remote = isConnected() ? await fetchWorkouts(dateKey(7), dateKey(0)) : demoWorkouts(8);
     const names = new Set(journal.map((w) => w.googleName).filter(Boolean));
+    // App-local structured detail (RPE/intensity/soreness/exercises), keyed by
+    // session id and merged on read — same side-store the API route serves.
+    const details = readJson<Record<string, WorkoutDetail>>("workout-detail.json", {});
     workouts = [...journal, ...remote.filter((w) => !names.has(w.googleName))]
       .filter((w) => w.date >= dateKey(7))
+      .map((w) => (details[w.id] ? { ...w, detail: details[w.id] } : w))
       .sort((a, b) => (a.date + a.startTime < b.date + b.startTime ? 1 : -1))
       .slice(0, 12);
   } catch {
@@ -247,6 +259,7 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
           (w.calories ? `, ${w.calories} kcal` : "") +
           (w.avgHr ? `, avg HR ${w.avgHr}` : "") +
           (w.notes ? ` — notes: ${w.notes}` : "") +
+          (formatDetail(w.detail) ? ` — ${formatDetail(w.detail)}` : "") +
           (w.source === "journal" ? " [journal]" : "")
       );
     }
@@ -263,6 +276,33 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
         `${f.loggedAt.slice(0, 16).replace("T", " ")}: ${f.name} — ${f.calories} kcal (P${f.proteinG ?? "?"}/C${f.carbsG ?? "?"}/F${f.fatG ?? "?"}g${f.glycemicLoad != null ? `, GL ${f.glycemicLoad}` : ""})`
       );
     }
+  }
+
+  // User-defined habits (boost/avoid) the user marked coach-visible, with
+  // today's progress and current streak. See lib/habits.ts.
+  try {
+    const today = dateKey(0);
+    const allRecords = getHabitRecords();
+    const habitLines = getHabitDefinitions()
+      .filter((h) => h.active && h.coachVisible)
+      .map((h) => formatHabitForCoach(h, computeHabitStatus(h, allRecords, today, today)));
+    if (habitLines.length) {
+      lines.push("", "== Habits (today) ==");
+      for (const l of habitLines) lines.push(l);
+      // Loggable ids so the coach can emit a logHabit action for the right habit.
+      const ids = getHabitDefinitions()
+        .filter((h) => h.active && h.coachVisible)
+        .map((h) => {
+          const t =
+            h.targetType === "yes_no"
+              ? "yes/no"
+              : `${h.targetType}${h.unit ? " in " + h.unit : ""}`;
+          return `${h.id} (${t})`;
+        });
+      lines.push(`logHabit ids: ${ids.join(", ")}`);
+    }
+  } catch {
+    // habits are optional context
   }
 
   if (records.length) {
@@ -319,7 +359,7 @@ export const COACH_PERSONA = `You are the in-app AI Health Coach of HealthTrack.
    Rules: strictly valid JSON (double quotes, no trailing commas, no comments). One JSON object per viz block. Put each block on its own lines between your prose. Use 1-2 cards per reply, only when they add value.
 
 5. ACTIONS (LOGGING ON THE USER'S BEHALF):
-   When the user reports a workout they did (e.g. "I did a legs workout for an hour"), log it by emitting a fenced code block with language tag "log" containing ONE JSON object. The app executes it and writes to the local journal AND to Google Health when connected:
+   When the user reports a workout, meal, or water they had (e.g. "I did a legs workout for an hour", "log my 2-egg omelette for breakfast"), log it by emitting a fenced code block with language tag "log" containing ONE JSON object. The app executes it and writes to the local log AND to Google Health when connected:
 
 \`\`\`log
 {"action":"logWorkout","name":"Leg day","exerciseType":"STRENGTH_TRAINING","durationMin":60,"date":"2026-06-11","startTime":"18:00","calories":300,"notes":"legs"}
@@ -328,5 +368,7 @@ export const COACH_PERSONA = `You are the in-app AI Health Coach of HealthTrack.
    Actions available:
    - logWorkout: name (short label), exerciseType (one of WALKING, RUNNING, BIKING, HIIT, STRENGTH_TRAINING, WEIGHTS, BODY_WEIGHT, CALISTHENICS, CROSSFIT, CORE_TRAINING, YOGA, PILATES, STRETCHING, SWIMMING_POOL, ELLIPTICAL, TREADMILL, ROWING_MACHINE, SPINNING, BOXING, MARTIAL_ARTS, DANCING, SOCCER, BASKETBALL, TENNIS, HIKING, JUMPING_ROPE, WORKOUT), durationMin, date (yyyy-MM-dd; use the current date from this prompt for "today"), startTime (HH:MM 24h; estimate from context, e.g. "this morning" ≈ 08:00), calories (estimate from type/duration/user weight if not given), notes (muscle groups or details the user mentioned, e.g. "legs").
    - logWater: {"action":"logWater","glasses":2} — each glass is 250 ml.
+   - logFood: {"action":"logFood","name":"2-egg omelette","mealType":"breakfast","calories":190,"proteinG":14,"carbsG":3,"fatG":14,"glycemicLoad":1,"loggedAt":"2026-06-11T08:00:00","notes":"two eggs, no oil"} — mealType is one of breakfast|lunch|dinner|other (infer from the meal or time of day). Estimate calories and macros from the meal description using your nutrition knowledge; glycemicLoad ≈ GI of the dish × net carbs ÷ 100 (≈0 for low-carb meals). loggedAt is ISO (yyyy-MM-ddTHH:MM:SS); use the current date/time from this prompt for "today"/"now", or estimate from context (e.g. "breakfast" ≈ 08:00). notes captures portion assumptions.
+   - logHabit: {"action":"logHabit","habitId":"read","value":10,"date":"2026-06-11","note":"before bed"} — log a user-defined habit. habitId MUST be one of the ids listed under "== Habits (today) ==" in the context (see the "logHabit ids" line); never invent one. value is a number for count/duration/quantity habits (in the habit's unit), or a boolean for yes/no habits — for a yes/no AVOID habit, value true means the avoided behavior happened (a slip) and false/omitted means it was avoided. date is yyyy-MM-dd (use today's date for "today"). Only use this when the user clearly reports doing a tracked habit (e.g. "read for 15 minutes", "that was my 2nd coffee"); if no matching habit id exists, do not emit a logHabit block.
 
-   Rules: only log when the user clearly reports an activity (not for hypotheticals or plans). Confirm what you logged in one short sentence BEFORE the block. Never emit the same log block twice in one reply. If key facts are missing, assume sensibly and say what you assumed.`;
+   Rules: only log when the user clearly reports a workout, meal, drink, or habit (not for hypotheticals or plans). Confirm what you logged in one short sentence BEFORE the block. Never emit the same log block twice in one reply. If key facts are missing, assume sensibly and say what you assumed.`;

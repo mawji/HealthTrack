@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChatMessage, CoachInsight, DaySummary } from "@/lib/types";
+import { ChatMessage, DaySummary } from "@/lib/types";
 import { VizCard, VizPlaceholder } from "@/components/ChatVisuals";
-
-const PERIODS = ["day", "week", "month"] as const;
 
 // ── Fenced protocols: ```viz renders a card, ```log executes an action ──
 
@@ -102,6 +100,53 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
             last = await res.json();
           }
           setDetail(`${glasses * 250} ml added · ${(last?.ml / 1000).toFixed(2)} L today`);
+        } else if (spec.action === "logFood") {
+          const res = await fetch("/api/food/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: spec.name,
+              mealType: spec.mealType,
+              calories: spec.calories,
+              proteinG: spec.proteinG,
+              carbsG: spec.carbsG,
+              fatG: spec.fatG,
+              glycemicLoad: spec.glycemicLoad,
+              loggedAt: spec.loggedAt,
+              notes: spec.notes,
+            }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const saved = await res.json();
+          setDetail(
+            `${saved.name} · ${saved.calories} kcal` +
+              (saved.syncedToHealth ? " · synced to Google Health" : " · saved")
+          );
+        } else if (spec.action === "logHabit") {
+          const res = await fetch("/api/habits/record", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              habitId: spec.habitId,
+              date: spec.date,
+              value: spec.value,
+              note: spec.note,
+            }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const { record, status } = await res.json();
+          if (!record) throw new Error("no matching habit");
+          const v =
+            typeof record.value === "boolean"
+              ? record.value
+                ? "yes"
+                : "no"
+              : record.value;
+          setDetail(
+            `${spec.habitId} · ${v}` +
+              (status?.completed ? " · on track" : "") +
+              (status?.streak ? ` · streak ${status.streak}d` : "")
+          );
         } else {
           throw new Error(`unknown action ${spec.action}`);
         }
@@ -212,13 +257,60 @@ function MessageContent({
   );
 }
 
-export default function Coach() {
-  const [period, setPeriod] = useState<(typeof PERIODS)[number]>("day");
-  const [insight, setInsight] = useState<CoachInsight | null>(null);
-  const [insightErr, setInsightErr] = useState("");
-  const [loadingInsight, setLoadingInsight] = useState(false);
+// A bank of starter prompts — a fresh handful is shown on each visit so the
+// page feels alive and surfaces what the coach can do (analysis + logging).
+const SUGGESTION_BANK = [
+  // Sleep
+  "How did I sleep this week?",
+  "Is my deep sleep where it should be?",
+  "Why have I been waking up tired?",
+  "What time should I wind down tonight?",
+  // Recovery & vitals
+  "Am I recovered enough to train hard today?",
+  "What is my HRV trend telling me?",
+  "Is my resting heart rate creeping up?",
+  "Anything concerning in my vitals lately?",
+  // Movement
+  "Am I on track for my step goal today?",
+  "How active have I been this week?",
+  "Have I been moving enough lately?",
+  // Training
+  "Plan tomorrow's workout",
+  "What should I train today?",
+  "Am I training too hard this week?",
+  "Help me build a balanced weekly plan",
+  "I did a 45-minute run this morning",
+  // Nutrition
+  "Am I eating enough protein?",
+  "How balanced were my meals today?",
+  "Am I in a calorie deficit this week?",
+  "I had oatmeal and eggs for breakfast",
+  "What should I eat after my workout?",
+  // Hydration
+  "Am I drinking enough water today?",
+  "Log 2 glasses of water",
+  // Trends & weight
+  "How is my weight trending?",
+  "What changed in my health this month?",
+  "Am I burning more than I'm eating?",
+  // Focus
+  "What should I focus on this week?",
+  "Give me one thing to improve today",
+];
 
+function pickSuggestions(n: number): string[] {
+  const pool = [...SUGGESTION_BANK];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, n);
+}
+
+export default function Coach() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Picked once per mount → a new set every time the user opens the page.
+  const [suggestions] = useState(() => pickSuggestions(4));
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -233,25 +325,6 @@ export default function Coach() {
       })
       .catch(() => {});
   }, []);
-
-  const loadInsight = (p: string, force = false) => {
-    setInsight(null);
-    setInsightErr("");
-    setLoadingInsight(true);
-    fetch(`/api/coach/insights?period=${p}${force ? "&refresh=1" : ""}`)
-      .then(async (r) => {
-        const json = await r.json();
-        if (!r.ok) throw new Error(json.error ?? "failed");
-        setInsight(json);
-      })
-      .catch((e) => setInsightErr(String(e.message ?? e)))
-      .finally(() => setLoadingInsight(false));
-  };
-
-  useEffect(() => {
-    loadInsight(period);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -307,65 +380,13 @@ export default function Coach() {
           />
           <div>
             <h1 className="page-title">Coach.</h1>
-            <p className="page-sub">Watching your numbers so you don&apos;t have to.</p>
+            <p className="page-sub">Ask a question, or tell me what you ate or trained.</p>
           </div>
         </div>
       </header>
 
-      <div className="row rise rise-2" style={{ gap: 8, marginBottom: 12 }}>
-        {PERIODS.map((p) => (
-          <button
-            key={p}
-            className={`btn ${p === period ? "" : "btn-ghost"}`}
-            style={{ padding: "7px 16px", fontSize: 13, textTransform: "capitalize" }}
-            onClick={() => setPeriod(p)}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-
-      <section className="card rise rise-3" style={{ borderLeft: "3px solid var(--breath)", position: "relative" }}>
-        <button
-          aria-label="regenerate summary"
-          title="Regenerate with the latest data"
-          onClick={() => loadInsight(period, true)}
-          disabled={loadingInsight}
-          className="icon-btn"
-          style={{ position: "absolute", top: 12, right: 12, width: 32, height: 32, opacity: loadingInsight ? 0.5 : 1 }}
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loadingInsight ? "pulsing" : undefined}>
-            <path d="M20.5 11a8.5 8.5 0 1 0-2 6.5" />
-            <path d="M21 21v-5h-5" />
-          </svg>
-        </button>
-        {loadingInsight && <p className="pulsing" style={{ color: "var(--breath)", fontWeight: 600 }}>Reading your {period}…</p>}
-        {insightErr && <p style={{ fontSize: 13.5, color: "var(--ink-soft)" }}>{insightErr}</p>}
-        {insight && (
-          <>
-            <h2 style={{ fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 560, lineHeight: 1.25, paddingRight: 36 }}>
-              {insight.headline}
-            </h2>
-            <MessageContent content={insight.body} week={weekData} isChat={false} />
-            {insight.viz && <VizCard spec={insight.viz} week={weekData} />}
-            <div className="stack" style={{ gap: 8, marginTop: 12 }}>
-              {insight.focusAreas?.map((f, i) => (
-                <div key={i} className="row" style={{ gap: 10, alignItems: "flex-start" }}>
-                  <span className="dot" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--breath)", marginTop: 7, flex: "none" }} />
-                  <div>
-                    <strong style={{ fontSize: 13.5 }}>{f.title}</strong>
-                    <span style={{ fontSize: 11.5, color: "var(--breath)", marginLeft: 7 }}>{f.metric}</span>
-                    <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{f.detail}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </section>
-
       {/* Chat */}
-      <section className="rise rise-4" style={{ marginTop: 18, flex: 1, display: "flex", flexDirection: "column" }}>
+      <section className="rise rise-2" style={{ marginTop: 4, flex: 1, display: "flex", flexDirection: "column" }}>
         <div className="card-label" style={{ marginBottom: 10 }}>
           <span className="dot" style={{ background: "var(--breath)" }} />
           Ask your coach
@@ -373,7 +394,7 @@ export default function Coach() {
         <div className="stack" style={{ gap: 12, flex: 1 }}>
           {messages.length === 0 && (
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              {["How did I sleep this week?", "Am I eating enough protein?", "Plan tomorrow's workout"].map((s) => (
+              {suggestions.map((s) => (
                 <button key={s} className="btn btn-ghost" style={{ fontSize: 12.5, padding: "8px 14px" }} onClick={() => setInput(s)}>
                   {s}
                 </button>

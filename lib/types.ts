@@ -54,6 +54,11 @@ export interface TrendsPayload {
   hrv: TrendPoint[];
   spo2: TrendPoint[];
   azm: TrendPoint[]; // active zone minutes ≈ daily cardio load
+  // Merged in by the health route (not the base trends builders), like the
+  // nutrition series below: water from the local hydration log, workoutMin
+  // (logged training minutes/day) from the archive + journal + live tail.
+  water?: TrendPoint[]; // ml/day
+  workoutMin?: TrendPoint[]; // logged workout minutes/day
   // Daily nutrition totals from the local food log (app-logged meals only —
   // the Google Health rollup doesn't expose macro sums). Merged in by the
   // health route, so the base trends builders don't populate them.
@@ -128,6 +133,17 @@ export interface MedicalRecord {
   metrics?: LabMetric[]; // structured results extracted from the document
 }
 
+/** App-local structured training detail. NOT synced to Google Health (the API
+ *  has no field for it). Stored in a side-store keyed by session id and merged
+ *  on read, same as the type-override store. */
+export interface WorkoutDetail {
+  intensity?: "easy" | "moderate" | "hard";
+  effort?: number; // RPE 1-10, subjective
+  soreness?: string;
+  injury?: string;
+  exercises?: { name: string; sets?: number; reps?: number; weightKg?: number }[];
+}
+
 export interface WorkoutSession {
   id: string;
   source: "google" | "journal";
@@ -140,8 +156,11 @@ export interface WorkoutSession {
   avgHr: number | null;
   distanceKm: number | null;
   notes?: string;
+  detail?: WorkoutDetail; // app-local structured detail, merged on read
   syncedToHealth: boolean;
   googleName?: string; // dataPoint resource name when synced
+  overridden?: boolean; // type/name was relabeled locally (Google's value is stale)
+  overrideSynced?: boolean; // the relabel was also written back to Google
 }
 
 export interface WaterEntry {
@@ -165,6 +184,66 @@ export interface RemoteFoodEntry {
   googleName?: string; // dataPoint resource name — matches FoodEntry.googleName
 }
 
+// ── Configurable habits ───────────────────────────────────────────────────
+// User-defined boost ("do more") and avoid ("stay within a limit") habits,
+// tracked daily with streaks. First-class behavior data, stored locally under
+// data/habits.json + data/habit-records.json. See plans/configurable-habits.md.
+
+export type HabitKind = "boost" | "avoid";
+export type HabitTargetType = "yes_no" | "count" | "duration" | "quantity";
+export type HabitGoalMode = "at_least" | "at_most" | "between" | "exactly" | "none";
+
+export interface HabitDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  iconKey: string; // stable key into the controlled habit-icon registry
+  color?: string; // css var token, e.g. "var(--activity)"
+  kind: HabitKind;
+  targetType: HabitTargetType;
+  goalMode: HabitGoalMode;
+  unit?: string; // cups, minutes, pages, grams, …
+  targetMin?: number; // used by at_least / between / exactly
+  targetMax?: number; // used by at_most / between
+  defaultValue?: number; // pre-fill / quick-add step for numeric habits
+  active: boolean;
+  showOnDaily: boolean;
+  coachVisible: boolean;
+  nudgeEnabled: boolean; // reserved for the future proactive-guidance system
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HabitRecord {
+  id: string;
+  habitId: string;
+  date: string; // yyyy-MM-dd in APP_TZ
+  // For yes_no this is a boolean meaning "the tracked behavior occurred today"
+  // (good for boost, the thing-to-avoid for avoid). Numeric types store a number.
+  value: boolean | number;
+  note?: string;
+  completed: boolean; // cached at write time; recomputed on read
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HabitComputedStatus {
+  habitId: string;
+  date: string;
+  completed: boolean;
+  value: boolean | number | null; // null when nothing logged for the date
+  streak: number; // consecutive completed days ending at date
+  bestStreak: number; // longest completed run across all history
+  missedToday: boolean; // date is today, not yet completed
+}
+
+export interface HabitsPayload {
+  date: string;
+  habits: HabitDefinition[];
+  records: HabitRecord[]; // records for the requested date
+  status: HabitComputedStatus[];
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -172,10 +251,44 @@ export interface ChatMessage {
 }
 
 export interface CoachInsight {
-  period: "day" | "week" | "month";
+  // day/week/month are actionable; quarter/year are retrospective summaries.
+  period: "day" | "week" | "month" | "quarter" | "year";
   generatedAt: string;
   headline: string;
   body: string;
-  viz?: Record<string, unknown> | null; // card spec rendered under the body
+  viz?: Record<string, unknown> | null; // single card spec (day/week/month)
+  vizCards?: Record<string, unknown>[] | null; // multiple cards for long-range retrospectives
   focusAreas: { title: string; detail: string; metric: string }[];
+}
+
+// ── Daily inline AI insights ──────────────────────────────────────────────
+// Section-level snippets shown inline on the Daily screen for the current day
+// only. See plans/daily-trends-ai-suggestions.md.
+
+export type InsightSection = "movement" | "readiness" | "hydration" | "sleep" | "nutrition";
+
+export type ReadinessBand = "low" | "fair" | "good" | "high";
+
+/** App-derived recovery score (NOT Google's readiness — the API exposes none). */
+export interface ReadinessScore {
+  score: number; // 0-100
+  band: ReadinessBand;
+  color: string; // css var token for the band
+  metric: string; // headline figure, e.g. "HRV 31ms below your 40–52ms normal"
+  reasons: string[]; // short grounded explanations
+  confident: boolean; // false during baseline cold-start (<~14 days history)
+}
+
+export interface DailyInsightSection {
+  section: InsightSection;
+  text: string; // one short sentence grounded in a number
+  metric: string; // the figure it is based on
+}
+
+export interface DailyInsightsResponse {
+  date: string;
+  generatedAt: string;
+  today: boolean; // false → previous day, sections always empty
+  readiness: ReadinessScore | null;
+  sections: DailyInsightSection[];
 }

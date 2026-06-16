@@ -1,16 +1,92 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Sparkline } from "@/components/Sparkline";
-import { TrendsPayload, TrendPoint } from "@/lib/types";
+import { InsightView } from "@/components/InsightView";
+import { CoachInsight, DaySummary, TrendsPayload, TrendPoint } from "@/lib/types";
+
+// Array-valued series on TrendsPayload that a TrendCard can chart.
+type SeriesKey =
+  | "steps" | "azm" | "workoutMin"
+  | "restingHr" | "hrv" | "spo2"
+  | "sleepMin"
+  | "caloriesOut" | "caloriesIn" | "weightKg"
+  | "proteinG" | "carbsG" | "fatG" | "glycemicLoad"
+  | "water";
+
+type CardCfg = {
+  key: SeriesKey;
+  label: string;
+  color: string;
+  unit: string;
+  fmt: (v: number) => string;
+  lowerBetter?: boolean;
+  mode?: "avg" | "range";
+  /** Core metrics render even on sparse ranges; others hide when no data. */
+  always?: boolean;
+};
+
+// Cards grouped into meaningful sections, mirroring the Daily page clusters.
+const SECTIONS: { title: string; cards: CardCfg[] }[] = [
+  {
+    title: "Movement",
+    cards: [
+      { key: "steps", label: "Steps", color: "var(--activity)", unit: "/day", fmt: (v) => Math.round(v).toLocaleString(), always: true },
+      { key: "azm", label: "Active minutes", color: "var(--activity)", unit: "min/day", fmt: (v) => Math.round(v).toString() },
+      { key: "workoutMin", label: "Workouts", color: "var(--activity)", unit: "min/day", fmt: (v) => Math.round(v).toString() },
+    ],
+  },
+  {
+    title: "Heart & recovery",
+    cards: [
+      { key: "restingHr", label: "Resting heart rate", color: "var(--heart)", unit: "bpm", fmt: (v) => v.toFixed(0), lowerBetter: true, always: true },
+      { key: "hrv", label: "Heart rate variability", color: "var(--heart)", unit: "ms", fmt: (v) => v.toFixed(0) },
+      { key: "spo2", label: "SpO₂", color: "var(--breath)", unit: "%", fmt: (v) => v.toFixed(1) },
+    ],
+  },
+  {
+    title: "Sleep",
+    cards: [
+      { key: "sleepMin", label: "Sleep", color: "var(--sleep)", unit: "", fmt: (v) => `${(v / 60).toFixed(1)}h`, always: true },
+    ],
+  },
+  {
+    title: "Energy",
+    cards: [
+      { key: "caloriesOut", label: "Calories burned", color: "var(--activity)", unit: "kcal", fmt: (v) => Math.round(v).toLocaleString(), always: true },
+      { key: "caloriesIn", label: "Calories in", color: "var(--food)", unit: "kcal", fmt: (v) => Math.round(v).toLocaleString() },
+      { key: "weightKg", label: "Weight", color: "var(--food)", unit: "kg", fmt: (v) => v.toFixed(1), mode: "range", always: true },
+    ],
+  },
+  {
+    title: "Nutrition",
+    // Cover app-logged meals only; the whole section hides until something is logged.
+    cards: [
+      { key: "proteinG", label: "Protein", color: "var(--food)", unit: "g/day", fmt: (v) => Math.round(v).toString() },
+      { key: "carbsG", label: "Carbs", color: "var(--food)", unit: "g/day", fmt: (v) => Math.round(v).toString() },
+      { key: "fatG", label: "Fat", color: "var(--food)", unit: "g/day", fmt: (v) => Math.round(v).toString() },
+      { key: "glycemicLoad", label: "Glycemic load", color: "var(--food)", unit: "/day", fmt: (v) => Math.round(v).toString(), lowerBetter: true },
+    ],
+  },
+  {
+    title: "Hydration",
+    cards: [
+      { key: "water", label: "Water", color: "var(--breath)", unit: "L/day", fmt: (v) => (v / 1000).toFixed(2) },
+    ],
+  },
+];
 
 const RANGES = [
-  { label: "Week", days: 7 },
-  { label: "Month", days: 30 },
-  { label: "3 Months", days: 90 },
+  { label: "Week", days: 7, period: "week" },
+  { label: "Month", days: 30, period: "month" },
+  // Retrospective ranges: no auto-generate, no inline actions.
+  { label: "3 Months", days: 90, period: "quarter" },
   // Served almost entirely from the local archive (data/archive.db).
-  { label: "Year", days: 365 },
-];
+  { label: "Year", days: 365, period: "year" },
+] as const;
+
+// quarter/year are long-range retrospectives — summary on demand only.
+const LONG_RANGE_DAYS = new Set([90, 365]);
 
 function avg(points: TrendPoint[]) {
   const vals = points.map((p) => p.value).filter((v): v is number => v != null);
@@ -22,12 +98,53 @@ export default function Trends() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<TrendsPayload | null>(null);
 
+  // Reused coach insight system (headline/body/viz/focusAreas) per range.
+  const [weekData, setWeekData] = useState<DaySummary[]>([]);
+  const [insight, setInsight] = useState<CoachInsight | null>(null);
+  const [insightErr, setInsightErr] = useState("");
+  const [loadingInsight, setLoadingInsight] = useState(false);
+
+  const range = RANGES.find((r) => r.days === days)!;
+  const isLong = LONG_RANGE_DAYS.has(days);
+
   useEffect(() => {
     setData(null);
     fetch(`/api/health?view=trends&days=${days}`)
       .then((r) => r.json())
       .then(setData)
       .catch(() => {});
+  }, [days]);
+
+  // Recent days power any viz card the insight returns.
+  useEffect(() => {
+    fetch("/api/health?view=today")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.week) setWeekData(d.week);
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadInsight = (period: string, force = false) => {
+    setInsight(null);
+    setInsightErr("");
+    setLoadingInsight(true);
+    fetch(`/api/coach/insights?period=${period}${force ? "&refresh=1" : ""}`)
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? "failed");
+        setInsight(json);
+      })
+      .catch((e) => setInsightErr(String(e.message ?? e)))
+      .finally(() => setLoadingInsight(false));
+  };
+
+  // Week/Month auto-generate on selection; long ranges wait for an explicit click.
+  useEffect(() => {
+    setInsight(null);
+    setInsightErr("");
+    if (!LONG_RANGE_DAYS.has(days)) loadInsight(range.period);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
 
   return (
@@ -50,34 +167,64 @@ export default function Trends() {
         ))}
       </div>
 
+      {isLong ? (
+        <section className="card rise rise-1" style={{ borderLeft: "3px solid var(--breath)", marginBottom: 16 }}>
+          {!insight && !loadingInsight && !insightErr && (
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                <div className="card-label"><span className="dot" style={{ background: "var(--breath)" }} />Long-range summary</div>
+                <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 4 }}>
+                  A retrospective look at your last {range.label.toLowerCase()}.
+                </p>
+              </div>
+              <button className="btn" style={{ padding: "8px 16px", fontSize: 13, flex: "none" }} onClick={() => loadInsight(range.period)}>
+                Generate summary
+              </button>
+            </div>
+          )}
+          {loadingInsight && <p className="pulsing" style={{ color: "var(--breath)", fontWeight: 600 }}>Summarizing your last {range.label.toLowerCase()}…</p>}
+          {insightErr && <p style={{ fontSize: 13.5, color: "var(--ink-soft)" }}>{insightErr}</p>}
+          {insight && <InsightView insight={insight} week={weekData} />}
+        </section>
+      ) : (
+        (loadingInsight || insight || insightErr) && (
+          <section className="card rise rise-1" style={{ borderLeft: "3px solid var(--breath)", marginBottom: 16 }}>
+            {loadingInsight && <p className="pulsing" style={{ color: "var(--breath)", fontWeight: 600 }}>Reading your {range.label.toLowerCase()}…</p>}
+            {insightErr && <p style={{ fontSize: 13.5, color: "var(--ink-soft)" }}>{insightErr}</p>}
+            {insight && <InsightView insight={insight} week={weekData} />}
+          </section>
+        )
+      )}
+
       {!data ? (
         <p className="pulsing" style={{ color: "var(--ink-soft)" }}>Loading trends…</p>
       ) : (
         <div className="stack desk-grid">
-          <TrendCard rise={2} label="Steps" color="var(--activity)" points={data.steps} unit="/day" fmt={(v) => Math.round(v).toLocaleString()} />
-          <TrendCard rise={3} label="Resting heart rate" color="var(--heart)" points={data.restingHr} unit="bpm" fmt={(v) => v.toFixed(0)} lowerBetter />
-          <TrendCard rise={4} label="Sleep" color="var(--sleep)" points={data.sleepMin} unit="" fmt={(v) => `${(v / 60).toFixed(1)}h`} />
-          <TrendCard rise={5} label="Weight" color="var(--food)" points={data.weightKg} unit="kg" fmt={(v) => v.toFixed(1)} mode="range" />
-          {avg(data.hrv) != null && (
-            <TrendCard rise={6} label="Heart rate variability" color="var(--heart)" points={data.hrv} unit="ms" fmt={(v) => v.toFixed(0)} />
-          )}
-          {avg(data.spo2) != null && (
-            <TrendCard rise={6} label="SpO₂" color="var(--breath)" points={data.spo2} unit="%" fmt={(v) => v.toFixed(1)} />
-          )}
-          <TrendCard rise={6} label="Calories burned" color="var(--activity)" points={data.caloriesOut} unit="kcal" fmt={(v) => Math.round(v).toLocaleString()} />
-          {/* Nutrition series cover app-logged meals only; hide until something is logged. */}
-          {avg(data.proteinG ?? []) != null && (
-            <TrendCard rise={6} label="Protein" color="var(--food)" points={data.proteinG!} unit="g/day" fmt={(v) => Math.round(v).toString()} />
-          )}
-          {avg(data.carbsG ?? []) != null && (
-            <TrendCard rise={6} label="Carbs" color="var(--food)" points={data.carbsG!} unit="g/day" fmt={(v) => Math.round(v).toString()} />
-          )}
-          {avg(data.fatG ?? []) != null && (
-            <TrendCard rise={6} label="Fat" color="var(--food)" points={data.fatG!} unit="g/day" fmt={(v) => Math.round(v).toString()} />
-          )}
-          {avg(data.glycemicLoad ?? []) != null && (
-            <TrendCard rise={6} label="Glycemic load" color="var(--food)" points={data.glycemicLoad!} unit="/day" fmt={(v) => Math.round(v).toString()} lowerBetter />
-          )}
+          {SECTIONS.map((sec, si) => {
+            const visible = sec.cards.filter((c) => {
+              const pts = data[c.key] as TrendPoint[] | undefined;
+              return c.always ? !!pts : avg(pts ?? []) != null;
+            });
+            if (!visible.length) return null;
+            return (
+              <Fragment key={sec.title}>
+                <h2 className={`section-title desk-span rise rise-${Math.min(si + 1, 6)}`}>{sec.title}</h2>
+                {visible.map((c) => (
+                  <TrendCard
+                    key={c.key}
+                    rise={Math.min(si + 2, 6)}
+                    label={c.label}
+                    color={c.color}
+                    points={(data[c.key] as TrendPoint[]) ?? []}
+                    unit={c.unit}
+                    fmt={c.fmt}
+                    lowerBetter={c.lowerBetter}
+                    mode={c.mode}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
           {data.demo && (
             <p className="desk-span" style={{ fontSize: 12, color: "var(--ink-faint)", textAlign: "center" }}>
               Showing demo data — connect Google Health on the Today tab for your real trends.

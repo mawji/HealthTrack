@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson, localDateStr, APP_TZ } from "./store";
+import { EXERCISE_TYPE_SET } from "./workout-types";
 import {
   DaySummary,
   RemoteFoodEntry,
@@ -676,28 +677,41 @@ export async function logFoodToGoogleHealth(entry: {
 
 // -- Workouts (exercise sessions) ---------------------------------
 
-const EXERCISE_TYPES = new Set([
-  "WALKING","RUNNING","BIKING","HIIT","STRENGTH_TRAINING","WEIGHTS","FREE_WEIGHTS",
-  "WEIGHTLIFTING","WEIGHT_MACHINES","BODY_WEIGHT","CALISTHENICS","CIRCUIT_TRAINING",
-  "CROSSFIT","POWERLIFTING","CORE_TRAINING","YOGA","PILATES","STRETCHING","SWIMMING_POOL",
-  "SWIMMING","ELLIPTICAL","TREADMILL","TREADMILL_WALK","ROWING_MACHINE","STAIRCLIMBER",
-  "SPINNING","STATIONARY_BIKE","BOXING","KICKBOXING","MARTIAL_ARTS","DANCING","ZUMBA",
-  "SOCCER","BASKETBALL","TENNIS","BADMINTON","CRICKET","GOLF","HIKING","JUMPING_ROPE",
-  "MEDITATE","AEROBIC_WORKOUT","CARDIO_WORKOUT","INTERVAL_WORKOUT","OUTDOOR_WORKOUT",
-  "WORKOUT","OTHER",
-]);
-
 /** Coerces a free-form activity word to a valid ExerciseType enum value. */
 export function normalizeExerciseType(raw: string): string {
   const t = (raw || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  if (EXERCISE_TYPES.has(t)) return t;
+  if (EXERCISE_TYPE_SET.has(t)) return t;
   if (/LEG|GYM|LIFT|WEIGHT/.test(t)) return "STRENGTH_TRAINING";
   if (/WALK/.test(t)) return "WALKING";
   if (/RUN|JOG/.test(t)) return "RUNNING";
   if (/CYCL|BIK/.test(t)) return "BIKING";
   if (/SWIM/.test(t)) return "SWIMMING_POOL";
   if (/YOGA/.test(t)) return "YOGA";
+  // Enum-shaped token we don't have in the bundled snapshot — likely a type
+  // Google added after it. Pass it through rather than collapsing to WORKOUT.
+  if (/^[A-Z][A-Z0-9_]{2,}$/.test(t)) return t;
   return "WORKOUT";
+}
+
+/** Rewrite an existing exercise session's type + display name on Google via a
+ *  read-modify-write patch. Returns true only if Google accepted the write —
+ *  sessions owned by another source app are commonly rejected, in which case
+ *  the caller keeps a local override instead. */
+export async function updateExerciseType(
+  name: string,
+  exerciseType: string,
+  displayName: string
+): Promise<boolean> {
+  try {
+    const point = await gFetch(`/${name}`);
+    if (!point?.exercise) return false;
+    point.exercise.exerciseType = normalizeExerciseType(exerciseType);
+    point.exercise.displayName = displayName;
+    const res = await gFetch(`/${name}`, { method: "PATCH", body: point });
+    return res != null;
+  } catch {
+    return false;
+  }
 }
 
 /** Exercise sessions whose start falls inside [start, endInclusive] civil days. */

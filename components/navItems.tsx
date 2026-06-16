@@ -49,6 +49,18 @@ export const NAV_ITEMS = [
     ),
   },
   {
+    href: "/habits",
+    label: "Habits",
+    color: "var(--activity)",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 6.5h11M4 12h11M4 17.5h7" />
+        <path d="M18 5.5l1.6 1.6L23 4" />
+        <path d="M18 16l1.6 1.6L23 14.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/coach",
     label: "Coach",
     color: "var(--breath)",

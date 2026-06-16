@@ -2,23 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { Sparkline, Bars } from "@/components/Sparkline";
-import { IconChip, DumbbellIcon, FlameIcon, HeartIcon, workoutIcon } from "@/components/icons";
-import { TrendsPayload, WorkoutSession } from "@/lib/types";
+import { IconChip, DumbbellIcon, FlameIcon, HeartIcon, workoutIcon, workoutLabel } from "@/components/icons";
+import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
+import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
+import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
+import { formatDetail, detailIsEmpty } from "@/lib/workout-detail";
+import { TrendsPayload, WorkoutSession, WorkoutDetail } from "@/lib/types";
 
 const RANGES = [
   { label: "Week", days: 7 },
   { label: "Month", days: 31 },
-];
-
-const QUICK_TYPES = [
-  { label: "Walk", type: "WALKING" },
-  { label: "Run", type: "RUNNING" },
-  { label: "Weights", type: "STRENGTH_TRAINING" },
-  { label: "HIIT", type: "HIIT" },
-  { label: "Yoga", type: "YOGA" },
-  { label: "Bike", type: "BIKING" },
-  { label: "Swim", type: "SWIMMING_POOL" },
-  { label: "Other", type: "WORKOUT" },
 ];
 
 const dayLetter = (date: string) => "SMTWTFS"[new Date(date + "T00:00:00").getDay()];
@@ -44,12 +37,17 @@ export default function Fitness() {
   const [trends, setTrends] = useState<TrendsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [logOpen, setLogOpen] = useState(false);
-  const [logType, setLogType] = useState(QUICK_TYPES[2]);
+  const [logType, setLogType] = useState<WorkoutType>(DEFAULT_QUICK_TYPES[2]);
+  const [quickTypes, setQuickTypes] = useState<WorkoutType[]>(DEFAULT_QUICK_TYPES);
   const [logMin, setLogMin] = useState(45);
   const [logDate, setLogDate] = useState("");
   const [logTime, setLogTime] = useState("");
   const [logNotes, setLogNotes] = useState("");
+  const [logDetail, setLogDetail] = useState<WorkoutDetail>({});
   const [logSaving, setLogSaving] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  // Draft detail for the session currently being edited in the history list.
+  const [detailDraft, setDetailDraft] = useState<WorkoutDetail>({});
 
   const load = (d: number) => {
     setLoading(true);
@@ -60,6 +58,7 @@ export default function Fitness() {
       .then(([w, t]) => {
         setSessions(w.sessions ?? []);
         setRange(w.range ?? null);
+        if (w.quickTypes?.length) setQuickTypes(w.quickTypes);
         setTrends(t);
       })
       .finally(() => setLoading(false));
@@ -82,18 +81,48 @@ export default function Fitness() {
           date: logDate || undefined,
           startTime: logTime || undefined,
           notes: logNotes || undefined,
+          detail: detailIsEmpty(logDetail) ? undefined : logDetail,
         }),
       });
       setLogOpen(false);
       setLogNotes("");
+      setLogDetail({});
       load(days);
     } finally {
       setLogSaving(false);
     }
   }
 
+  // Save edited structured detail for an existing session (journal or Google).
+  async function saveDetail(w: WorkoutSession, detail: WorkoutDetail) {
+    await fetch("/api/workouts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: w.id, detail: detailIsEmpty(detail) ? null : detail }),
+    });
+    setEditing(null);
+    load(days);
+  }
+
   async function removeSession(id: string) {
     await fetch(`/api/workouts?id=${id}`, { method: "DELETE" });
+    load(days);
+  }
+
+  // Relabel a session locally — Google sometimes reports a generic or wrong
+  // type (e.g. "Lacrosse" for a gym session) that an edit in the Health app
+  // never propagates back to the API. The override is stored on our side.
+  async function relabel(w: WorkoutSession, type?: WorkoutType) {
+    await fetch("/api/workouts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        type
+          ? { id: w.id, source: w.source, googleName: w.googleName, name: type.label, exerciseType: type.type }
+          : { id: w.id, clear: true }
+      ),
+    });
+    setEditing(null);
     load(days);
   }
 
@@ -235,15 +264,26 @@ export default function Fitness() {
             <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>kcal today</span>
           </div>
           <div style={{ marginTop: 10 }}>
-            {trends && (
-              <Bars
-                values={trends.caloriesOut.slice(-7).map((p) => p.value ?? 0)}
-                color="var(--food)"
-                labels={trends.caloriesOut.slice(-7).map((p) => dayLetter(p.date))}
-                tipFormat={(v) => `${Math.round(v).toLocaleString()} kcal`}
-                height={56}
-              />
-            )}
+            {trends && (() => {
+              const week = trends.caloriesOut.slice(-7);
+              const burned = week.map((p) => p.value ?? 0);
+              // Calories burned sit on a high constant floor (~2,500/day), so
+              // scaling from zero flattens the bars. Anchor the chart just below
+              // the week's lowest day so daily variation actually reads.
+              const pos = burned.filter((v) => v > 0);
+              const lo = pos.length ? Math.min(...pos) : 0;
+              const hi = burned.length ? Math.max(...burned) : 0;
+              return (
+                <Bars
+                  values={burned}
+                  color="var(--food)"
+                  labels={week.map((p) => dayLetter(p.date))}
+                  tipFormat={(v) => `${Math.round(v).toLocaleString()} kcal`}
+                  height={56}
+                  baseline={lo - (hi - lo) * 0.3}
+                />
+              );
+            })()}
           </div>
         </section>
 
@@ -253,22 +293,8 @@ export default function Fitness() {
             <IconChip icon={DumbbellIcon} color="var(--activity)" />
             Log a workout
           </div>
-          <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 12 }}>
-            {QUICK_TYPES.map((q) => (
-              <button
-                key={q.type}
-                className="badge"
-                onClick={() => setLogType(q)}
-                style={{
-                  cursor: "pointer",
-                  border: "none",
-                  background: q.type === logType.type ? "var(--activity)" : "var(--activity-soft)",
-                  color: q.type === logType.type ? "var(--bg)" : "var(--activity)",
-                }}
-              >
-                {q.label}
-              </button>
-            ))}
+          <div style={{ marginTop: 12 }}>
+            <WorkoutTypePicker quickTypes={quickTypes} selected={logType.type} onPick={setLogType} />
           </div>
           <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             <label style={{ flex: "1 1 80px" }}>
@@ -291,7 +317,10 @@ export default function Fitness() {
             onChange={(e) => setLogNotes(e.target.value)}
             style={{ marginTop: 8, padding: "9px 12px" }}
           />
-          <button className="btn" style={{ background: "var(--activity)", marginTop: 10, width: "100%" }} onClick={saveWorkout} disabled={logSaving}>
+          <div style={{ marginTop: 12 }}>
+            <WorkoutDetailForm value={logDetail} onChange={setLogDetail} accent="var(--activity)" accentSoft="var(--activity-soft)" />
+          </div>
+          <button className="btn" style={{ background: "var(--activity)", marginTop: 12, width: "100%" }} onClick={saveWorkout} disabled={logSaving}>
             {logSaving ? "Saving…" : "Save workout"}
           </button>
           <p style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 8 }}>
@@ -315,37 +344,81 @@ export default function Fitness() {
                   </p>
                   <div className="stack" style={{ gap: 8 }}>
                     {byDay.get(date)!.map((w) => (
-                      <div key={w.id} className="card row" style={{ padding: "12px 16px", justifyContent: "space-between", gap: 10 }}>
-                        <div className="row" style={{ gap: 12, minWidth: 0 }}>
-                          <IconChip icon={workoutIcon(w.exerciseType)} color="var(--food)" size={34} />
-                          <div style={{ minWidth: 0 }}>
-                            <strong style={{ fontSize: 14.5, textTransform: "capitalize" }}>{w.name}</strong>
-                            <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                              {w.startTime} · {fmtDur(w.durationMin)}
-                              {w.distanceKm ? ` · ${w.distanceKm} km` : ""}
-                              {w.avgHr ? ` · ${w.avgHr} bpm avg` : ""}
-                              {w.notes ? ` · ${w.notes}` : ""}
-                              {w.source === "journal" && (w.syncedToHealth ? " · ✓ synced" : " · journal")}
-                            </p>
+                      <div key={w.id} className="card" style={{ padding: "12px 16px" }}>
+                        <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                          <div className="row" style={{ gap: 12, minWidth: 0 }}>
+                            <IconChip icon={workoutIcon(w.exerciseType)} color="var(--food)" size={34} />
+                            <div style={{ minWidth: 0 }}>
+                              <strong style={{ fontSize: 14.5, textTransform: "capitalize" }}>{workoutLabel(w)}</strong>
+                              <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                                {w.startTime} · {fmtDur(w.durationMin)}
+                                {w.distanceKm ? ` · ${w.distanceKm} km` : ""}
+                                {w.avgHr ? ` · ${w.avgHr} bpm avg` : ""}
+                                {w.notes ? ` · ${w.notes}` : ""}
+                                {w.source === "journal" && (w.syncedToHealth ? " · ✓ synced" : " · journal")}
+                                {w.overridden ? (w.overrideSynced ? " · relabeled ✓ Google" : " · relabeled locally") : ""}
+                              </p>
+                              {!detailIsEmpty(w.detail) && (
+                                <p style={{ fontSize: 11.5, color: "var(--activity)", marginTop: 2 }}>
+                                  {formatDetail(w.detail)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="row" style={{ gap: 10, flex: "none" }}>
+                            {w.calories != null && (
+                              <span className="display-num" style={{ fontSize: 16, color: "var(--food)" }}>
+                                {w.calories} kcal
+                              </span>
+                            )}
+                            <button
+                              onClick={() => {
+                                const open = editing === w.id ? null : w.id;
+                                setEditing(open);
+                                if (open) setDetailDraft(w.detail ?? {});
+                              }}
+                              style={{ background: "none", border: "none", color: editing === w.id ? "var(--activity)" : "var(--ink-faint)", cursor: "pointer", fontSize: 14 }}
+                              aria-label="edit workout"
+                              title="Edit type & detail"
+                            >
+                              ✎
+                            </button>
+                            {w.source === "journal" && (
+                              <button
+                                onClick={() => removeSession(w.id)}
+                                style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 14 }}
+                                aria-label="delete workout"
+                                title="Delete journal entry"
+                              >
+                                ✕
+                              </button>
+                            )}
                           </div>
                         </div>
-                        <div className="row" style={{ gap: 10, flex: "none" }}>
-                          {w.calories != null && (
-                            <span className="display-num" style={{ fontSize: 16, color: "var(--food)" }}>
-                              {w.calories} kcal
-                            </span>
-                          )}
-                          {w.source === "journal" && (
+                        {editing === w.id && (
+                          <div style={{ marginTop: 12, borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
+                            <p style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 8 }}>
+                              Set type
+                            </p>
+                            <WorkoutTypePicker
+                              quickTypes={quickTypes}
+                              selected={w.exerciseType}
+                              onPick={(t) => relabel(w, t)}
+                              onRevert={w.overridden ? () => relabel(w) : undefined}
+                            />
+                            <p style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", margin: "14px 0 8px" }}>
+                              Detail
+                            </p>
+                            <WorkoutDetailForm value={detailDraft} onChange={setDetailDraft} accent="var(--activity)" accentSoft="var(--activity-soft)" />
                             <button
-                              onClick={() => removeSession(w.id)}
-                              style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 14 }}
-                              aria-label="delete workout"
-                              title="Delete journal entry"
+                              className="btn"
+                              style={{ background: "var(--activity)", marginTop: 12, width: "100%" }}
+                              onClick={() => saveDetail(w, detailDraft)}
                             >
-                              ✕
+                              Save detail
                             </button>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

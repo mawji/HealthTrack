@@ -21,8 +21,25 @@ import {
   DumbbellIcon,
   DropIcon,
   workoutIcon,
+  workoutLabel,
+  habitIcon,
 } from "@/components/icons";
-import { DaySummary, HealthPayload, WorkoutSession } from "@/lib/types";
+import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
+import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
+import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
+import { detailIsEmpty, formatDetail } from "@/lib/workout-detail";
+import {
+  DaySummary,
+  HealthPayload,
+  WorkoutSession,
+  WorkoutDetail,
+  DailyInsightsResponse,
+  InsightSection,
+  ReadinessScore,
+  HabitDefinition,
+  HabitComputedStatus,
+  HabitsPayload,
+} from "@/lib/types";
 
 function greeting() {
   const h = new Date().getHours();
@@ -45,16 +62,6 @@ function stepStreak(week: DaySummary[]): number {
 
 const dayLetter = (date: string) => "SMTWTFS"[new Date(date + "T00:00:00").getDay()];
 
-const QUICK_TYPES = [
-  { label: "Walk", type: "WALKING" },
-  { label: "Run", type: "RUNNING" },
-  { label: "Weights", type: "STRENGTH_TRAINING" },
-  { label: "HIIT", type: "HIIT" },
-  { label: "Yoga", type: "YOGA" },
-  { label: "Bike", type: "BIKING" },
-  { label: "Swim", type: "SWIMMING_POOL" },
-  { label: "Other", type: "WORKOUT" },
-];
 
 function addDaysStr(date: string, n: number): string {
   const d = new Date(date + "T12:00:00Z");
@@ -71,9 +78,17 @@ export default function Daily() {
   const [waterBusy, setWaterBusy] = useState(false);
   const [workouts, setWorkouts] = useState<WorkoutSession[]>([]);
   const [logOpen, setLogOpen] = useState(false);
-  const [logType, setLogType] = useState(QUICK_TYPES[2]);
+  const [logType, setLogType] = useState<WorkoutType>(DEFAULT_QUICK_TYPES[2]);
+  const [quickTypes, setQuickTypes] = useState<WorkoutType[]>(DEFAULT_QUICK_TYPES);
   const [logMin, setLogMin] = useState(45);
+  const [logNotes, setLogNotes] = useState("");
+  const [logDetail, setLogDetail] = useState<WorkoutDetail>({});
+  const [showDetail, setShowDetail] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [insights, setInsights] = useState<DailyInsightsResponse | null>(null);
+  const [habits, setHabits] = useState<HabitsPayload | null>(null);
+  const [habitBusy, setHabitBusy] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/health?view=today")
@@ -86,6 +101,36 @@ export default function Daily() {
       .catch(() => setErr("Could not load health data."));
     loadWorkouts();
   }, []);
+
+  // Daily inline insights + app-derived readiness dial, refetched per displayed day.
+  const shownDate = data?.today.date;
+  useEffect(() => {
+    if (!shownDate) return;
+    setInsights(null);
+    fetch(`/api/daily-insights?date=${shownDate}`)
+      .then((r) => r.json())
+      .then(setInsights)
+      .catch(() => {});
+    loadHabits(shownDate);
+  }, [shownDate]);
+
+  const loadHabits = (date: string) =>
+    fetch(`/api/habits?date=${date}`).then((r) => r.json()).then(setHabits).catch(() => {});
+
+  async function logHabit(habitId: string, value: boolean | number | null) {
+    if (!shownDate) return;
+    setHabitBusy(habitId);
+    try {
+      await fetch("/api/habits/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ habitId, date: shownDate, value }),
+      });
+      await loadHabits(shownDate);
+    } finally {
+      setHabitBusy(null);
+    }
+  }
 
   const loadWater = (date: string) =>
     fetch(`/api/water?date=${date}`).then((r) => r.json()).then(setWater).catch(() => {});
@@ -125,8 +170,27 @@ export default function Daily() {
   const loadWorkouts = () =>
     fetch("/api/workouts?days=7")
       .then((r) => r.json())
-      .then((j) => setWorkouts(j.sessions ?? []))
+      .then((j) => {
+        setWorkouts(j.sessions ?? []);
+        if (j.quickTypes?.length) setQuickTypes(j.quickTypes);
+      })
       .catch(() => {});
+
+  // Relabel a session locally when Google reports a wrong/generic type that
+  // editing in the Health app never propagates back. Pass no type to revert.
+  async function relabel(w: WorkoutSession, type?: WorkoutType) {
+    await fetch("/api/workouts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        type
+          ? { id: w.id, source: w.source, googleName: w.googleName, name: type.label, exerciseType: type.type }
+          : { id: w.id, clear: true }
+      ),
+    });
+    setEditing(null);
+    await loadWorkouts();
+  }
 
   async function changeWater(delta: number) {
     if (waterBusy) return;
@@ -158,9 +222,18 @@ export default function Daily() {
       await fetch("/api/workouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: logType.label, exerciseType: logType.type, durationMin: logMin }),
+        body: JSON.stringify({
+          name: logType.label,
+          exerciseType: logType.type,
+          durationMin: logMin,
+          notes: logNotes || undefined,
+          detail: detailIsEmpty(logDetail) ? undefined : logDetail,
+        }),
       });
       setLogOpen(false);
+      setLogNotes("");
+      setLogDetail({});
+      setShowDetail(false);
       await loadWorkouts();
     } finally {
       setLogSaving(false);
@@ -196,6 +269,10 @@ export default function Daily() {
   const exerciseDays = data.week.filter((d) => workoutDates.has(d.date)).length;
   const recentWorkouts = workouts.slice(0, 4);
   const glassesGoal = 8; // 2 L
+
+  const insightFor = (s: InsightSection) =>
+    insights?.date === t.date ? insights.sections.find((x) => x.section === s)?.text ?? null : null;
+  const readiness = insights?.date === t.date ? insights.readiness : null;
 
   return (
     <main className="page">
@@ -290,6 +367,10 @@ export default function Daily() {
       <div className="stack desk-grid">
         <h2 className="section-title desk-span rise rise-1">Daily activity</h2>
 
+        {insightFor("movement") && (
+          <div className="desk-span"><Insight text={insightFor("movement")} color="var(--activity)" /></div>
+        )}
+
         {/* Movement */}
         <section className="card rise rise-2">
           <div className="card-label">
@@ -362,6 +443,148 @@ export default function Daily() {
           </p>
         </section>
 
+        {/* Activity / workouts */}
+        <section className="card rise rise-3">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="card-label">
+              <IconChip icon={DumbbellIcon} color="var(--food)" />
+              Workouts
+            </div>
+            <span className="badge" style={{ background: "var(--food-soft)", color: "var(--food)" }}>
+              {exerciseDays} of 5 exercise days
+            </span>
+          </div>
+          <div className="row" style={{ gap: 4, marginTop: 14, justifyContent: "space-between" }}>
+            {data.week.map((d, i) => {
+              const hit = workoutDates.has(d.date);
+              const isToday = i === data.week.length - 1;
+              return (
+                <div key={d.date} className={`streak-day ${isToday ? "today" : ""}`}>
+                  <div className={`streak-dot ${hit ? "hit" : ""}`} style={hit ? { background: "var(--food)", borderColor: "var(--food)" } : undefined}>
+                    {hit ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 12.5l4.5 4.5L19 7.5" />
+                      </svg>
+                    ) : (
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "block" }} />
+                    )}
+                  </div>
+                  <span className="day-letter">{dayLetter(d.date)}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="stack" style={{ gap: 8, marginTop: 14 }}>
+            {recentWorkouts.length === 0 && (
+              <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>No workouts this week yet.</p>
+            )}
+            {recentWorkouts.map((w) => (
+              <div key={w.id}>
+                <div className="row" style={{ gap: 10, justifyContent: "space-between" }}>
+                  <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                    <IconChip icon={workoutIcon(w.exerciseType)} color="var(--food)" size={30} />
+                    <div style={{ minWidth: 0 }}>
+                      <strong style={{ fontSize: 13.5, textTransform: "capitalize" }}>{workoutLabel(w)}</strong>
+                      <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                        {w.date === data.today.date ? "Today" : dayLetter(w.date) + " " + w.date.slice(5)} · {w.startTime} · {w.durationMin} min
+                        {w.source === "journal" && (w.syncedToHealth ? " · ✓ synced" : " · journal")}
+                        {w.overridden ? (w.overrideSynced ? " · relabeled ✓ Google" : " · relabeled locally") : ""}
+                      </p>
+                      {!detailIsEmpty(w.detail) && (
+                        <p style={{ fontSize: 11, color: "var(--food)", marginTop: 1 }}>{formatDetail(w.detail)}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 8, flex: "none" }}>
+                    <span className="display-num" style={{ fontSize: 14, color: "var(--food)" }}>
+                      {w.calories ? `${w.calories} kcal` : w.avgHr ? `${w.avgHr} bpm` : ""}
+                    </span>
+                    <button
+                      onClick={() => setEditing(editing === w.id ? null : w.id)}
+                      style={{ background: "none", border: "none", color: editing === w.id ? "var(--food)" : "var(--ink-faint)", cursor: "pointer", fontSize: 13 }}
+                      aria-label="relabel workout type"
+                      title="Fix workout type"
+                    >
+                      ✎
+                    </button>
+                  </div>
+                </div>
+                {editing === w.id && (
+                  <div style={{ marginTop: 8, marginLeft: 40 }}>
+                    <WorkoutTypePicker
+                      quickTypes={quickTypes}
+                      selected={w.exerciseType}
+                      onPick={(t) => relabel(w, t)}
+                      onRevert={w.overridden ? () => relabel(w) : undefined}
+                      accent="var(--food)"
+                      accentSoft="var(--food-soft)"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {logOpen ? (
+            <div style={{ marginTop: 12 }}>
+              <WorkoutTypePicker
+                quickTypes={quickTypes}
+                selected={logType.type}
+                onPick={setLogType}
+                accent="var(--food)"
+                accentSoft="var(--food-soft)"
+              />
+              <div className="row" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
+                <input
+                  className="field"
+                  type="number"
+                  value={logMin}
+                  min={1}
+                  onChange={(e) => setLogMin(Number(e.target.value))}
+                  style={{ width: 90, padding: "8px 10px" }}
+                />
+                <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>min</span>
+                <input
+                  className="field"
+                  placeholder="Notes…"
+                  value={logNotes}
+                  onChange={(e) => setLogNotes(e.target.value)}
+                  style={{ flex: 1, minWidth: 80, padding: "8px 10px" }}
+                />
+              </div>
+              {showDetail ? (
+                <div style={{ marginTop: 12 }}>
+                  <WorkoutDetailForm value={logDetail} onChange={setLogDetail} />
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowDetail(true)}
+                  style={{ background: "none", border: "none", color: "var(--food)", cursor: "pointer", fontSize: 12.5, padding: 0, marginTop: 10 }}
+                >
+                  + Add detail (intensity, effort, exercises)
+                </button>
+              )}
+              <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                <button className="btn" style={{ background: "var(--food)", padding: "9px 18px", fontSize: 13 }} onClick={saveWorkout} disabled={logSaving}>
+                  {logSaving ? "Saving…" : "Save"}
+                </button>
+                <button className="btn btn-ghost" style={{ padding: "9px 14px", fontSize: 13 }} onClick={() => setLogOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button className="btn btn-ghost" style={{ marginTop: 12, fontSize: 13, padding: "8px 16px" }} onClick={() => setLogOpen(true)}>
+              + Log activity
+            </button>
+          )}
+        </section>
+
+        {insightFor("hydration") && (
+          <div className="desk-span"><Insight text={insightFor("hydration")} color="var(--breath)" /></div>
+        )}
+
         {/* Water — shown every day; quick-add is a "now" action, so the +/− controls only appear on today. */}
         <section className="card rise rise-3">
           <div className="row" style={{ justifyContent: "space-between" }}>
@@ -425,106 +648,30 @@ export default function Daily() {
           </div>
         </section>
 
-        {/* Activity / workouts */}
-        <section className="card rise rise-3">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div className="card-label">
-              <IconChip icon={DumbbellIcon} color="var(--food)" />
-              Workouts
-            </div>
-            <span className="badge" style={{ background: "var(--food-soft)", color: "var(--food)" }}>
-              {exerciseDays} of 5 exercise days
-            </span>
-          </div>
-          <div className="row" style={{ gap: 4, marginTop: 14, justifyContent: "space-between" }}>
-            {data.week.map((d, i) => {
-              const hit = workoutDates.has(d.date);
-              const isToday = i === data.week.length - 1;
-              return (
-                <div key={d.date} className={`streak-day ${isToday ? "today" : ""}`}>
-                  <div className={`streak-dot ${hit ? "hit" : ""}`} style={hit ? { background: "var(--food)", borderColor: "var(--food)" } : undefined}>
-                    {hit ? (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12.5l4.5 4.5L19 7.5" />
-                      </svg>
-                    ) : (
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "block" }} />
-                    )}
-                  </div>
-                  <span className="day-letter">{dayLetter(d.date)}</span>
-                </div>
-              );
-            })}
-          </div>
+        <HabitsWidget
+          habits={habits}
+          busyId={habitBusy}
+          onLog={logHabit}
+        />
 
-          <div className="stack" style={{ gap: 8, marginTop: 14 }}>
-            {recentWorkouts.length === 0 && (
-              <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>No workouts this week yet.</p>
-            )}
-            {recentWorkouts.map((w) => (
-              <div key={w.id} className="row" style={{ gap: 10, justifyContent: "space-between" }}>
-                <div className="row" style={{ gap: 10, minWidth: 0 }}>
-                  <IconChip icon={workoutIcon(w.exerciseType)} color="var(--food)" size={30} />
-                  <div style={{ minWidth: 0 }}>
-                    <strong style={{ fontSize: 13.5, textTransform: "capitalize" }}>{w.name}</strong>
-                    <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                      {w.date === data.today.date ? "Today" : dayLetter(w.date) + " " + w.date.slice(5)} · {w.startTime} · {w.durationMin} min
-                      {w.source === "journal" && (w.syncedToHealth ? " · ✓ synced" : " · journal")}
-                    </p>
-                  </div>
-                </div>
-                <span className="display-num" style={{ fontSize: 14, color: "var(--food)", flex: "none" }}>
-                  {w.calories ? `${w.calories} kcal` : w.avgHr ? `${w.avgHr} bpm` : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {logOpen ? (
-            <div style={{ marginTop: 12 }}>
-              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                {QUICK_TYPES.map((q) => (
-                  <button
-                    key={q.type}
-                    className="badge"
-                    onClick={() => setLogType(q)}
-                    style={{
-                      cursor: "pointer",
-                      border: "none",
-                      background: q.type === logType.type ? "var(--food)" : "var(--food-soft)",
-                      color: q.type === logType.type ? "var(--bg)" : "var(--food)",
-                    }}
-                  >
-                    {q.label}
-                  </button>
-                ))}
-              </div>
-              <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                <input
-                  className="field"
-                  type="number"
-                  value={logMin}
-                  min={1}
-                  onChange={(e) => setLogMin(Number(e.target.value))}
-                  style={{ width: 90, padding: "8px 10px" }}
-                />
-                <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>min</span>
-                <button className="btn" style={{ background: "var(--food)", padding: "9px 18px", fontSize: 13 }} onClick={saveWorkout} disabled={logSaving}>
-                  {logSaving ? "Saving…" : "Save"}
-                </button>
-                <button className="btn btn-ghost" style={{ padding: "9px 14px", fontSize: 13 }} onClick={() => setLogOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button className="btn btn-ghost" style={{ marginTop: 12, fontSize: 13, padding: "8px 16px" }} onClick={() => setLogOpen(true)}>
-              + Log activity
-            </button>
-          )}
-        </section>
+        <MetricRow
+          label="Steps this week"
+          icon={StepsIcon}
+          value={Math.round(data.week.reduce((a, d) => a + d.steps, 0) / data.week.length).toLocaleString()}
+          unit="avg/day"
+          color="var(--activity)"
+          series={data.week.map((d) => d.steps)}
+          labels={weekLabels}
+          sub="Last 7 days"
+          bars
+          rise={3}
+        />
 
         <h2 className="section-title desk-span rise rise-3">Sleep</h2>
+
+        {insightFor("sleep") && (
+          <div className="desk-span"><Insight text={insightFor("sleep")} color="var(--sleep)" /></div>
+        )}
 
         {/* Sleep */}
         <section className="card desk-span rise rise-3">
@@ -571,7 +718,13 @@ export default function Daily() {
           )}
         </section>
 
-        <h2 className="section-title desk-span rise rise-4">Key metrics</h2>
+        <h2 className="section-title desk-span rise rise-4">Recovery</h2>
+
+        {insightFor("readiness") && (
+          <div className="desk-span"><Insight text={insightFor("readiness")} color={readiness?.color ?? "var(--heart)"} /></div>
+        )}
+
+        {readiness && <ReadinessDial readiness={readiness} rise={4} />}
 
         {/* Heart */}
         <section className="card rise rise-4">
@@ -595,37 +748,6 @@ export default function Daily() {
                 {z.name} {z.minutes}m
               </span>
             ))}
-          </div>
-        </section>
-
-        {/* Energy balance */}
-        <section className="card rise rise-4">
-          <div className="card-label">
-            <IconChip icon={FlameIcon} color="var(--food)" />
-            Energy balance
-          </div>
-          <div className="row" style={{ justifyContent: "space-between", marginTop: 12, alignItems: "baseline" }}>
-            <div>
-              <span className="display-num" style={{ fontSize: 25 }}>{t.caloriesIn.toLocaleString()}</span>
-              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}> in</span>
-            </div>
-            <span className="display-num" style={{ fontSize: 16, color: balance > 0 ? "var(--food)" : "var(--activity)" }}>
-              {balance > 0 ? "+" : ""}{balance.toLocaleString()}
-            </span>
-            <div>
-              <span className="display-num" style={{ fontSize: 25 }}>{t.caloriesOut.toLocaleString()}</span>
-              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}> out</span>
-            </div>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <SignedBars
-              values={data.week.map((d) => d.caloriesIn - d.caloriesOut)}
-              posColor="var(--food)"
-              negColor="var(--activity)"
-              labels={weekLabels}
-              height={64}
-              tipFormat={(v) => `${v > 0 ? "+" : ""}${Math.round(v).toLocaleString()} kcal`}
-            />
           </div>
         </section>
 
@@ -673,6 +795,43 @@ export default function Daily() {
           sub={dayLabel}
           rise={6}
         />
+        <h2 className="section-title desk-span rise rise-5">Energy</h2>
+
+        {insightFor("nutrition") && (
+          <div className="desk-span"><Insight text={insightFor("nutrition")} color="var(--food)" /></div>
+        )}
+
+        {/* Energy balance */}
+        <section className="card rise rise-5">
+          <div className="card-label">
+            <IconChip icon={FlameIcon} color="var(--food)" />
+            Energy balance
+          </div>
+          <div className="row" style={{ justifyContent: "space-between", marginTop: 12, alignItems: "baseline" }}>
+            <div>
+              <span className="display-num" style={{ fontSize: 25 }}>{t.caloriesIn.toLocaleString()}</span>
+              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}> in</span>
+            </div>
+            <span className="display-num" style={{ fontSize: 16, color: balance > 0 ? "var(--food)" : "var(--activity)" }}>
+              {balance > 0 ? "+" : ""}{balance.toLocaleString()}
+            </span>
+            <div>
+              <span className="display-num" style={{ fontSize: 25 }}>{t.caloriesOut.toLocaleString()}</span>
+              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}> out</span>
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <SignedBars
+              values={data.week.map((d) => d.caloriesIn - d.caloriesOut)}
+              posColor="var(--food)"
+              negColor="var(--activity)"
+              labels={weekLabels}
+              height={64}
+              tipFormat={(v) => `${v > 0 ? "+" : ""}${Math.round(v).toLocaleString()} kcal`}
+            />
+          </div>
+        </section>
+
         <MetricRow
           label="Weight"
           icon={ScaleIcon}
@@ -684,20 +843,82 @@ export default function Daily() {
           sub={dayLabel}
           rise={6}
         />
-        <MetricRow
-          label="Steps this week"
-          icon={StepsIcon}
-          value={Math.round(data.week.reduce((a, d) => a + d.steps, 0) / data.week.length).toLocaleString()}
-          unit="avg/day"
-          color="var(--activity)"
-          series={data.week.map((d) => d.steps)}
-          labels={weekLabels}
-          sub="Last 7 days"
-          bars
-          rise={6}
-        />
       </div>
     </main>
+  );
+}
+
+/**
+ * Inline AI insight snippet, rendered at the head of a Daily cluster. Renders
+ * nothing when there is no meaningful advice for that section (today only).
+ */
+function Insight({ text, color = "var(--activity)" }: { text: string | null; color?: string }) {
+  if (!text) return null;
+  return (
+    <div
+      className="rise rise-1"
+      style={{
+        display: "flex",
+        gap: 9,
+        alignItems: "flex-start",
+        padding: "10px 14px",
+        borderRadius: 14,
+        background: `color-mix(in srgb, ${color} 9%, var(--bg-raised))`,
+        border: `1px solid color-mix(in srgb, ${color} 22%, transparent)`,
+        fontSize: 13,
+        lineHeight: 1.45,
+        color: "var(--ink)",
+      }}
+    >
+      <span aria-hidden style={{ color, fontWeight: 800, flex: "none", marginTop: -1 }}>✦</span>
+      <span>{text}</span>
+    </div>
+  );
+}
+
+const READINESS_LABEL: Record<ReadinessScore["band"], string> = {
+  low: "Low",
+  fair: "Fair",
+  good: "Good",
+  high: "High",
+};
+
+/** App-derived recovery dial (0-100, color-banded). Not Google's readiness score. */
+function ReadinessDial({ readiness, rise }: { readiness: ReadinessScore; rise: number }) {
+  const { score, band, color, reasons, confident } = readiness;
+  return (
+    <section className={`card rise rise-${rise}`}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <div className="card-label">
+          <IconChip icon={PulseIcon} color={color} />
+          Readiness
+          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-soft)", marginLeft: 6 }}>
+            · as of last night
+          </span>
+        </div>
+        <span className="badge" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>
+          {READINESS_LABEL[band]}
+        </span>
+      </div>
+      <div className="row" style={{ gap: 20, marginTop: 14, alignItems: "center" }}>
+        <Ring progress={score / 100} color={color} track={`color-mix(in srgb, ${color} 16%, var(--bg-inset))`} size={96} stroke={9}>
+          <span className="display-num" style={{ fontSize: 26, color }}>{score}</span>
+          <span style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>/ 100</span>
+        </Ring>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+          {reasons.length ? (
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {reasons.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+          ) : (
+            <p style={{ margin: 0 }}>HRV, resting heart rate and sleep are in line with your baseline.</p>
+          )}
+          <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.8 }}>
+            App-derived from HRV · RHR · sleep{confident ? "" : " · baseline still building"}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -748,5 +969,134 @@ function MetricRow({
         </div>
       </div>
     </section>
+  );
+}
+
+/** Compact Daily habits card: active, Daily-visible habits with quick logging.
+ *  Full configuration lives on the /habits page. */
+function HabitsWidget({
+  habits,
+  busyId,
+  onLog,
+}: {
+  habits: HabitsPayload | null;
+  busyId: string | null;
+  onLog: (habitId: string, value: boolean | number | null) => void;
+}) {
+  const shown = (habits?.habits ?? []).filter((h) => h.active && h.showOnDaily);
+  if (!shown.length) return null;
+  const statusFor = (id: string) => habits?.status.find((s) => s.habitId === id);
+
+  return (
+    <section className="card desk-span rise rise-3">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <div className="card-label">
+          <IconChip
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 6.5h10M4 12h10M4 17.5h6" />
+                <path d="M17 5.5l1.6 1.6L22 4" />
+              </svg>
+            }
+            color="var(--activity)"
+          />
+          Habits
+        </div>
+        <a href="/habits" style={{ fontSize: 12.5, color: "var(--ink-soft)", textDecoration: "none" }}>
+          Manage →
+        </a>
+      </div>
+      <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+        {shown.map((h) => (
+          <HabitMini
+            key={h.id}
+            habit={h}
+            status={statusFor(h.id)}
+            busy={busyId === h.id}
+            onLog={(v) => onLog(h.id, v)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HabitMini({
+  habit,
+  status,
+  busy,
+  onLog,
+}: {
+  habit: HabitDefinition;
+  status?: HabitComputedStatus;
+  busy: boolean;
+  onLog: (v: boolean | number | null) => void;
+}) {
+  const color = habit.color ?? "var(--activity)";
+  const value = status?.value ?? null;
+  const completed = status?.completed ?? false;
+  const streak = status?.streak ?? 0;
+
+  let control: React.ReactNode;
+  if (habit.targetType === "yes_no") {
+    const goodValue = habit.kind === "boost" ? true : false;
+    const isGood = value === goodValue;
+    control = (
+      <button
+        className="icon-btn"
+        disabled={busy}
+        aria-label={isGood ? "clear" : "mark done"}
+        onClick={() => onLog(isGood ? null : goodValue)}
+        style={isGood ? { background: color, color: "var(--bg)", borderColor: color } : undefined}
+      >
+        ✓
+      </button>
+    );
+  } else {
+    const current = typeof value === "number" ? value : 0;
+    const step =
+      habit.targetType === "duration" ? 10 : habit.defaultValue && habit.defaultValue > 0 ? habit.defaultValue : 1;
+    control = (
+      <div className="row" style={{ gap: 8 }}>
+        <button
+          className="icon-btn"
+          disabled={busy || current <= 0}
+          aria-label="decrease"
+          onClick={() => onLog(Math.max(0, current - step) || null)}
+          style={{ opacity: current <= 0 ? 0.4 : 1 }}
+        >
+          −
+        </button>
+        <span className="display-num" style={{ fontSize: 17, minWidth: 26, textAlign: "center", color }}>
+          {current}
+        </span>
+        <button
+          className="icon-btn"
+          disabled={busy}
+          aria-label="increase"
+          onClick={() => onLog(current + step)}
+          style={{ background: color, color: "var(--bg)", borderColor: color, fontSize: 17 }}
+        >
+          +
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="row" style={{ justifyContent: "space-between", gap: 10, opacity: busy ? 0.6 : 1 }}>
+      <div className="row" style={{ gap: 10, minWidth: 0 }}>
+        <IconChip icon={habitIcon(habit.iconKey)} color={completed ? color : "var(--ink-soft)"} size={24} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {habit.name}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+            {streak > 0 ? `🔥 ${streak}d` : habit.kind === "boost" ? "boost" : "avoid"}
+          </div>
+        </div>
+      </div>
+      {control}
+    </div>
   );
 }

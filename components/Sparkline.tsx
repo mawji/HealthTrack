@@ -228,6 +228,7 @@ export function Bars({
   labels,
   tipLabels,
   tipFormat = (v) => v.toLocaleString(),
+  baseline = 0,
 }: {
   values: number[];
   color: string;
@@ -236,9 +237,15 @@ export function Bars({
   labels?: string[];
   tipLabels?: string[];
   tipFormat?: (v: number) => string;
+  // Value mapped to the bottom of the chart. Defaults to 0 (bars scale from
+  // zero). Set above 0 for series with a high constant floor — e.g. daily
+  // calories burned — so day-to-day variation isn't compressed into a flat band.
+  baseline?: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(...values, 1);
+  const max = Math.max(...values, baseline + 1);
+  const floor = Math.min(baseline, ...values);
+  const span = max - floor || 1;
   return (
     <div className="chart-wrap">
       {hover !== null && values[hover] != null && (
@@ -258,7 +265,7 @@ export function Bars({
               style={{
                 width: "100%",
                 borderRadius: 6,
-                height: `${Math.max((v / max) * 100, 4)}%`,
+                height: `${Math.max(((v - floor) / span) * 100, 4)}%`,
                 background:
                   i === hover
                     ? `color-mix(in srgb, ${color} 75%, white)`

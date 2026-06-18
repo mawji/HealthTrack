@@ -1,0 +1,68 @@
+# HealthTrack — example Caddy config for HTTPS.
+#
+# You only need this to INSTALL the app (PWA) or open it from ANOTHER device
+# (e.g. your phone): browsers require a secure context — HTTPS, or localhost.
+# On the same machine you can skip Caddy entirely and install from
+# http://localhost:3210.
+#
+# The app stays local-only; Caddy faces the network and handles TLS.
+#   1) Run the app:   npm run start            # binds 127.0.0.1:3210
+#   2) Run Caddy:     caddy run --config ./Caddyfile
+#
+# Copy this file to `Caddyfile`, uncomment ONE option, and edit the hostname.
+
+# ── Option A — real domain, server reachable on ports 80/443 (simplest) ──
+# Caddy fetches a trusted Let's Encrypt cert automatically; phones install with
+# no device setup. Point an A/AAAA DNS record at this server first.
+health.example.com {
+	reverse_proxy 127.0.0.1:3210
+}
+
+# ── Option B — real domain, server NOT publicly reachable (home / LAN) ──
+# DNS-01 challenge gets a trusted cert without inbound 80/443, so the box can
+# stay on a private LAN. Phones install with NO device setup.
+#
+# IMPORTANT: the standard Caddy binary has NO DNS plugins. You need a Caddy
+# built with your provider's plugin. Any one of:
+#   - xcaddy build --with github.com/caddy-dns/cloudflare
+#   - download a custom build from https://caddyserver.com/download (tick the plugin)
+#   - caddy add-package github.com/caddy-dns/cloudflare   (Caddy 2.7+), then reload
+# Verify with:  caddy list-modules | grep dns.providers
+#
+# Then: (1) create a DNS API token (Cloudflare → API Tokens → Zone:DNS:Edit on
+# your zone); (2) add an A record health.example.com → <server IP> — for a
+# LAN-only box use the PRIVATE IP and set it "DNS only" (not proxied);
+# (3) run:  export CLOUDFLARE_API_TOKEN=...  then  caddy run --config ./Caddyfile
+# No domain? DuckDNS is free: use the caddy-dns/duckdns plugin + DuckDNS token.
+# health.example.com {
+# 	tls {
+# 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+# 	}
+# 	reverse_proxy 127.0.0.1:3210
+# }
+
+# ── Option C — local-only hostname, no public domain (e.g. health.local) ──
+# Caddy issues from its OWN internal CA. Trusted automatically on the server,
+# but every OTHER device (your phone) must install Caddy's root CA, or the
+# browser shows "Not secure" and blocks PWA install.
+#
+# Getting the root cert (two gotchas):
+#   - it's created only AFTER Caddy serves a `tls internal` site at least once;
+#   - it lives under Caddy's DATA dir, not the config dir (/etc/caddy). On a
+#     systemd install: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+#     (macOS: ~/Library/Application Support/Caddy/...; Windows: %AppData%\Caddy\...).
+# Easiest: export it via the admin API (on by default at localhost:2019).
+#   Linux/macOS:  curl -s http://localhost:2019/pki/ca/local | jq -r .root_certificate > caddy-root.crt
+#   Windows PS (no jq/curl needed):
+#     (Invoke-RestMethod http://localhost:2019/pki/ca/local).root_certificate | Set-Content -Encoding ascii caddy-root.crt
+# Then install caddy-root.crt on the phone — Android: Settings → Security →
+# Encryption & credentials → Install a certificate → CA certificate. iOS: install
+# the profile, then General → About → Certificate Trust Settings → enable full trust.
+# health.local {
+# 	tls internal
+# 	reverse_proxy 127.0.0.1:3210
+# }
+
+# NOTE: if you connect Google Health THROUGH this hostname, also add
+# https://<host>/api/googlehealth/callback as an authorized redirect URI in the
+# Google Cloud console (alongside the localhost one).

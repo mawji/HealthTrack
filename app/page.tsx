@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Ring from "@/components/Ring";
 import GoalBar from "@/components/GoalBar";
 import SleepClock from "@/components/SleepClock";
 import RangeBars from "@/components/RangeBars";
 import Hypnogram from "@/components/Hypnogram";
 import { Sparkline, Bars, SignedBars } from "@/components/Sparkline";
-import ThemeToggle from "@/components/ThemeToggle";
-import AvatarMenu from "@/components/AvatarMenu";
 import {
   IconChip,
   StepsIcon,
@@ -39,6 +37,9 @@ import {
   HabitDefinition,
   HabitComputedStatus,
   HabitsPayload,
+  GoalDefinition,
+  GoalProgress,
+  GoalStatus,
 } from "@/lib/types";
 
 function greeting() {
@@ -89,6 +90,43 @@ export default function Daily() {
   const [insights, setInsights] = useState<DailyInsightsResponse | null>(null);
   const [habits, setHabits] = useState<HabitsPayload | null>(null);
   const [habitBusy, setHabitBusy] = useState<string | null>(null);
+  const [goalsData, setGoalsData] = useState<{ goals: GoalDefinition[]; progress: GoalProgress[] } | null>(null);
+
+  // Auto-refresh and lastUpdated states
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshCurrentData = useCallback(async (date: string, isSilent = false) => {
+    if (!date) return;
+    if (!isSilent) setDayBusy(true);
+    try {
+      const [healthRes, workoutsRes, goalsRes, waterRes] = await Promise.all([
+        fetch(`/api/health?view=today&date=${date}`).then((r) => r.json()),
+        fetch("/api/workouts?days=7").then((r) => r.json()),
+        fetch("/api/goals").then((r) => r.json()),
+        fetch(`/api/water?date=${date}`).then((r) => r.json()),
+      ]);
+
+      setData(healthRes);
+      setWorkouts(workoutsRes.sessions ?? []);
+      if (workoutsRes.quickTypes?.length) setQuickTypes(workoutsRes.quickTypes);
+      setGoalsData(goalsRes);
+      setWater(waterRes);
+
+      const [insightsRes, habitsRes] = await Promise.all([
+        fetch(`/api/daily-insights?date=${date}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/habits?date=${date}`).then((r) => r.json()).catch(() => null),
+      ]);
+      if (insightsRes) setInsights(insightsRes);
+      if (habitsRes) setHabits(habitsRes);
+
+      setLastUpdated(new Date());
+    } catch (e) {
+      console.error("Auto refresh failed", e);
+    } finally {
+      if (!isSilent) setDayBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetch("/api/health?view=today")
@@ -97,10 +135,35 @@ export default function Daily() {
         setData(j);
         setServerToday(j.today.date); // the app's "today" in the data timezone
         loadWater(j.today.date);
+        setLastUpdated(new Date());
       })
       .catch(() => setErr("Could not load health data."));
     loadWorkouts();
+    fetch("/api/goals").then((r) => r.json()).then(setGoalsData).catch(() => {});
   }, []);
+
+  // Auto-refresh timer effect
+  useEffect(() => {
+    const shownDate = data?.today.date;
+    const saved = localStorage.getItem("ht-auto-refresh") || "5";
+    if (saved === "disabled" || !shownDate) return;
+
+    const intervalMinutes = parseInt(saved, 10);
+    if (isNaN(intervalMinutes) || intervalMinutes <= 0) return;
+
+    const intervalMs = intervalMinutes * 60 * 1000;
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setIsRefreshing(true);
+        refreshCurrentData(shownDate, true).finally(() => {
+          setIsRefreshing(false);
+        });
+      }
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [data?.today.date, refreshCurrentData]);
 
   // Daily inline insights + app-derived readiness dial, refetched per displayed day.
   const shownDate = data?.today.date;
@@ -132,6 +195,16 @@ export default function Daily() {
     }
   }
 
+  async function reorderHabits(ids: string[]) {
+    // The widget already shows the new order optimistically; persist + resync.
+    await fetch("/api/habits/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    }).catch(() => {});
+    if (shownDate) loadHabits(shownDate);
+  }
+
   const loadWater = (date: string) =>
     fetch(`/api/water?date=${date}`).then((r) => r.json()).then(setWater).catch(() => {});
 
@@ -144,6 +217,7 @@ export default function Daily() {
       const res = await fetch(`/api/health?view=today&date=${next}`);
       setData(await res.json());
       loadWater(next);
+      setLastUpdated(new Date());
     } finally {
       setDayBusy(false);
     }
@@ -162,6 +236,7 @@ export default function Daily() {
       const res = await fetch(`/api/health?view=today&date=${date}`);
       setData(await res.json());
       loadWater(date);
+      setLastUpdated(new Date());
     } finally {
       setDayBusy(false);
     }
@@ -284,21 +359,42 @@ export default function Daily() {
                 ? `${greeting()}.`
                 : new Date(t.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + "."}
             </h1>
-            <p className="page-sub">
+            <p className="page-sub" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               {data.demo ? (
                 <a href="/api/googlehealth/auth" style={{ color: "var(--food)", fontWeight: 600, textDecoration: "none" }}>
                   demo data — connect Google Health
                 </a>
               ) : (
-                <span style={{ color: "var(--activity)", fontWeight: 600 }}>live · Google Health</span>
+                <span style={{ color: "var(--activity)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="pulse-dot" style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--activity)",
+                    display: "inline-block",
+                  }} />
+                  live · Google Health
+                </span>
+              )}
+              {lastUpdated && (
+                <span style={{
+                  color: "var(--ink-soft)",
+                  fontSize: 12.5,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  transition: "opacity 0.3s ease",
+                  opacity: isRefreshing ? 0.6 : 0.85,
+                }}>
+                  · Updated {lastUpdated.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                  {isRefreshing && (
+                    <svg className="spin" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ color: "var(--activity)" }}>
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l.73-.73" />
+                    </svg>
+                  )}
+                </span>
               )}
             </p>
-          </div>
-          <div className="row" style={{ gap: 8, flex: "none" }}>
-            <span className="desk-only">
-              <ThemeToggle />
-            </span>
-            <AvatarMenu />
           </div>
         </div>
 
@@ -365,13 +461,15 @@ export default function Daily() {
       </header>
 
       <div className="stack desk-grid">
+        <DailyGoals data={goalsData} />
+
         <h2 className="section-title desk-span rise rise-1">Daily activity</h2>
 
         {insightFor("movement") && (
           <div className="desk-span"><Insight text={insightFor("movement")} color="var(--activity)" /></div>
         )}
 
-        {/* Movement */}
+        {/* Movement — steps, weekly trend and goal streak grouped together */}
         <section className="card rise rise-2">
           <div className="card-label">
             <IconChip icon={StepsIcon} color="var(--activity)" />
@@ -401,46 +499,50 @@ export default function Daily() {
               <span style={{ fontSize: 9.5, color: "var(--ink-soft)", textAlign: "center", lineHeight: 1.2 }}>zone min<br />of {t.azmGoal}</span>
             </Ring>
           </div>
-        </section>
 
-        {/* Streak */}
-        <section className="card rise rise-2">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div className="card-label">
-              <IconChip icon={FlameIcon} color="var(--activity)" />
-              Streak
+          {/* Steps this week */}
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)" }}>Steps this week</span>
+              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                avg <strong className="display-num" style={{ fontSize: 14, color: "var(--ink)" }}>{Math.round(data.week.reduce((a, d) => a + d.steps, 0) / data.week.length).toLocaleString()}</strong>/day
+              </span>
             </div>
-            <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
-              {streak} day{streak === 1 ? "" : "s"}
-            </span>
+            <Bars values={data.week.map((d) => d.steps)} color="var(--activity)" labels={weekLabels} height={54} />
           </div>
-          <div className="row" style={{ gap: 4, marginTop: 16, justifyContent: "space-between" }}>
-            {data.week.map((d, i) => {
-              const hit = d.steps >= d.stepsGoal;
-              const isToday = i === data.week.length - 1;
-              return (
-                <div key={d.date} className={`streak-day ${isToday ? "today" : ""}`} title={`${d.date}: ${d.steps.toLocaleString()} steps`}>
-                  <div className={`streak-dot ${hit ? "hit" : ""}`}>
-                    {hit ? (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12.5l4.5 4.5L19 7.5" />
-                      </svg>
-                    ) : (
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "block" }} />
-                    )}
+
+          {/* Goal streak */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)" }}>
+                <span style={{ width: 15, height: 15, display: "inline-flex", verticalAlign: "-2px", marginRight: 6, color: "var(--activity)" }}>{FlameIcon}</span>
+                Goal streak
+              </span>
+              <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
+                {streak} day{streak === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="row" style={{ gap: 4, marginTop: 12, justifyContent: "space-between" }}>
+              {data.week.map((d, i) => {
+                const hit = d.steps >= d.stepsGoal;
+                const isLast = i === data.week.length - 1;
+                return (
+                  <div key={d.date} className={`streak-day ${isLast ? "today" : ""}`} title={`${d.date}: ${d.steps.toLocaleString()} steps`}>
+                    <div className={`streak-dot ${hit ? "hit" : ""}`}>
+                      {hit ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12.5l4.5 4.5L19 7.5" />
+                        </svg>
+                      ) : (
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "block" }} />
+                      )}
+                    </div>
+                    <span className="day-letter">{dayLetter(d.date)}</span>
                   </div>
-                  <span className="day-letter">{dayLetter(d.date)}</span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 13 }}>
-            {todayHit
-              ? streak >= 3
-                ? `On fire — ${streak} days straight. Keep the chain alive tomorrow.`
-                : "Goal hit today. One day at a time builds the chain."
-              : `${toGo.toLocaleString()} steps to keep the streak going today.`}
-          </p>
         </section>
 
         {/* Activity / workouts */}
@@ -581,12 +683,14 @@ export default function Daily() {
           )}
         </section>
 
+        <h2 className="section-title desk-span rise rise-3">Hydration</h2>
+
         {insightFor("hydration") && (
           <div className="desk-span"><Insight text={insightFor("hydration")} color="var(--breath)" /></div>
         )}
 
-        {/* Water — shown every day; quick-add is a "now" action, so the +/− controls only appear on today. */}
-        <section className="card rise rise-3">
+        {/* Water — its own section; quick-add is a "now" action, so the +/− controls only appear on today. */}
+        <section className="card desk-span rise rise-3">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div className="card-label">
               <IconChip icon={DropIcon} color="var(--breath)" />
@@ -648,23 +752,17 @@ export default function Daily() {
           </div>
         </section>
 
+        <h2 className="section-title desk-span rise rise-3">Habits</h2>
+
+        {insightFor("habits") && (
+          <div className="desk-span"><Insight text={insightFor("habits")} color="var(--activity)" /></div>
+        )}
+
         <HabitsWidget
           habits={habits}
           busyId={habitBusy}
           onLog={logHabit}
-        />
-
-        <MetricRow
-          label="Steps this week"
-          icon={StepsIcon}
-          value={Math.round(data.week.reduce((a, d) => a + d.steps, 0) / data.week.length).toLocaleString()}
-          unit="avg/day"
-          color="var(--activity)"
-          series={data.week.map((d) => d.steps)}
-          labels={weekLabels}
-          sub="Last 7 days"
-          bars
-          rise={3}
+          onReorder={reorderHabits}
         />
 
         <h2 className="section-title desk-span rise rise-3">Sleep</h2>
@@ -848,6 +946,71 @@ export default function Daily() {
   );
 }
 
+const GOAL_STATUS_COLOR: Record<GoalStatus, string> = {
+  met: "var(--activity)",
+  on_track: "var(--food)",
+  needs_attention: "var(--heart)",
+  no_data: "var(--ink-soft)",
+};
+
+type GoalOverlay = { label: string; line?: number; band?: [number, number]; statusColor: string };
+
+function goalTargetText(g: GoalDefinition): string {
+  const u = g.unit ? ` ${g.unit}` : "";
+  if (g.direction === "lower_is_better") return g.targetMax != null ? `≤ ${g.targetMax}${u}` : "set a target";
+  if (g.direction === "higher_is_better") return g.targetMin != null ? `≥ ${g.targetMin}${u}` : "set a target";
+  return g.targetMin != null && g.targetMax != null ? `${g.targetMin}–${g.targetMax}${u}` : "set a target";
+}
+
+/** Goals the user opted onto Daily (showOnDaily). Sits near the top — they're
+ *  what the user is steering toward. Status/progress are deterministic. */
+function DailyGoals({ data }: { data: { goals: GoalDefinition[]; progress: GoalProgress[] } | null }) {
+  if (!data) return null;
+  const shown = data.goals.filter((g) => g.active && g.showOnDaily);
+  if (!shown.length) return null;
+  const byId = new Map(data.progress.map((p) => [p.goalId, p]));
+  return (
+    <section className="card desk-span rise rise-1">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <div className="card-label">
+          <IconChip icon={habitIcon("check")} color="var(--sleep)" />
+          Goals
+        </div>
+        <a href="/goals" style={{ fontSize: 12, color: "var(--ink-soft)", textDecoration: "none" }}>Manage →</a>
+      </div>
+      <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+        {shown.map((g) => {
+          const p = byId.get(g.id);
+          const hasValue = p?.latestValue != null;
+          const noTarget =
+            g.direction === "lower_is_better" ? g.targetMax == null : g.direction === "higher_is_better" ? g.targetMin == null : g.targetMin == null || g.targetMax == null;
+          const status: GoalStatus = !hasValue || noTarget ? "no_data" : p!.status;
+          const color = GOAL_STATUS_COLOR[status];
+          const pct = Math.round((p?.progress ?? 0) * 100);
+          return (
+            <div key={g.id}>
+              <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+                <span className="card-label" style={{ gap: 8, fontSize: 13.5, textTransform: "none", letterSpacing: 0 }}>
+                  <IconChip icon={habitIcon(g.iconKey)} color={color} size={22} />
+                  {g.label}
+                </span>
+                <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+                  <span style={{ color: "var(--ink)", fontWeight: 600 }}>{hasValue ? p!.latestValue : "—"}</span>
+                  {" / "}
+                  {goalTargetText(g)}
+                </span>
+              </div>
+              <div style={{ marginTop: 6, height: 5, borderRadius: 999, background: "var(--bg-inset)", overflow: "hidden" }}>
+                <div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: status === "no_data" ? "var(--hairline)" : color, transition: "width 0.3s" }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 /**
  * Inline AI insight snippet, rendered at the head of a Daily cluster. Renders
  * nothing when there is no meaningful advice for that section (today only).
@@ -934,6 +1097,7 @@ function MetricRow({
   bars = false,
   rise,
   sub = "Today",
+  goal,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -945,12 +1109,23 @@ function MetricRow({
   bars?: boolean;
   rise: number;
   sub?: string;
+  goal?: GoalOverlay;
 }) {
   return (
     <section className={`card rise rise-${rise}`} style={{ padding: "15px 18px" }}>
-      <div className="card-label">
-        <IconChip icon={icon} color={color} />
-        {label}
+      <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+        <div className="card-label">
+          <IconChip icon={icon} color={color} />
+          {label}
+        </div>
+        {goal && (
+          <span
+            className="badge"
+            style={{ background: `color-mix(in srgb, ${goal.statusColor} 16%, transparent)`, color: goal.statusColor, fontSize: 11 }}
+          >
+            Goal {goal.label}
+          </span>
+        )}
       </div>
       <div className="row" style={{ justifyContent: "space-between", gap: 18, marginTop: 8 }}>
         <div style={{ flex: "none" }}>
@@ -964,7 +1139,7 @@ function MetricRow({
           {bars ? (
             <Bars values={series.map((v) => v ?? 0)} color={color} labels={labels} height={52} />
           ) : (
-            <Sparkline values={series} color={color} dots labels={labels} height={56} width={230} />
+            <Sparkline values={series} color={color} dots labels={labels} height={56} width={230} target={goal?.line} targetBand={goal?.band} />
           )}
         </div>
       </div>
@@ -974,18 +1149,88 @@ function MetricRow({
 
 /** Compact Daily habits card: active, Daily-visible habits with quick logging.
  *  Full configuration lives on the /habits page. */
+const HABITS_COLLAPSED = 4;
+
 function HabitsWidget({
   habits,
   busyId,
   onLog,
+  onReorder,
 }: {
   habits: HabitsPayload | null;
   busyId: string | null;
   onLog: (habitId: string, value: boolean | number | null) => void;
+  onReorder: (ids: string[]) => void;
 }) {
   const shown = (habits?.habits ?? []).filter((h) => h.active && h.showOnDaily);
+  const [order, setOrder] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const orderRef = useRef<string[]>(order);
+  orderRef.current = order;
+  const draggingRef = useRef<string | null>(null);
+
+  // Re-seed the local drag order whenever the visible habit set changes.
+  const shownIds = shown.map((h) => h.id).join(",");
+  useEffect(() => {
+    setOrder(shown.map((h) => h.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownIds]);
+
   if (!shown.length) return null;
   const statusFor = (id: string) => habits?.status.find((s) => s.habitId === id);
+  const byId = new Map(shown.map((h) => [h.id, h]));
+  const ordered = order.map((id) => byId.get(id)).filter(Boolean) as HabitDefinition[];
+  const visible = expanded ? ordered : ordered.slice(0, HABITS_COLLAPSED);
+  const doneCount = shown.filter((h) => statusFor(h.id)?.completed).length;
+
+  // Pointer-based drag-to-reorder — one path for mouse and touch (HTML5 DnD
+  // doesn't fire on touchscreens). Rows shift live as the pointer moves; the
+  // new order is persisted on release.
+  const startDrag = (id: string, e: React.PointerEvent) => {
+    if (e.button !== undefined && e.button > 0) return; // primary button / touch only
+    e.preventDefault();
+    draggingRef.current = id;
+    setDragId(id);
+
+    const move = (ev: PointerEvent) => {
+      const src = draggingRef.current;
+      if (!src || !listRef.current) return;
+      ev.preventDefault();
+      const rows = [...listRef.current.querySelectorAll<HTMLElement>("[data-habit-id]")];
+      let targetId: string | null = null;
+      for (const row of rows) {
+        const r = row.getBoundingClientRect();
+        if (ev.clientY < r.top + r.height / 2) {
+          targetId = row.dataset.habitId ?? null;
+          break;
+        }
+      }
+      if (!targetId) targetId = rows[rows.length - 1]?.dataset.habitId ?? null;
+      if (!targetId || targetId === src) return;
+      setOrder((prev) => {
+        const cur = [...prev];
+        const from = cur.indexOf(src);
+        const to = cur.indexOf(targetId!);
+        if (from < 0 || to < 0) return prev;
+        cur.splice(from, 1);
+        cur.splice(to, 0, src);
+        return cur;
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      draggingRef.current = null;
+      setDragId(null);
+      onReorder(orderRef.current);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
 
   return (
     <section className="card desk-span rise rise-3">
@@ -1001,22 +1246,36 @@ function HabitsWidget({
             color="var(--activity)"
           />
           Habits
+          <span className="badge" style={{ marginLeft: 8, background: "var(--activity-soft)", color: "var(--activity)" }}>
+            {doneCount}/{shown.length}
+          </span>
         </div>
         <a href="/habits" style={{ fontSize: 12.5, color: "var(--ink-soft)", textDecoration: "none" }}>
           Manage →
         </a>
       </div>
-      <div className="stack" style={{ gap: 10, marginTop: 12 }}>
-        {shown.map((h) => (
+      <div ref={listRef} className="stack" style={{ gap: 10, marginTop: 12 }}>
+        {visible.map((h) => (
           <HabitMini
             key={h.id}
             habit={h}
             status={statusFor(h.id)}
             busy={busyId === h.id}
             onLog={(v) => onLog(h.id, v)}
+            dragging={dragId === h.id}
+            onHandlePointerDown={(e) => startDrag(h.id, e)}
           />
         ))}
       </div>
+      {ordered.length > HABITS_COLLAPSED && (
+        <button
+          className="btn btn-ghost"
+          onClick={() => setExpanded((e) => !e)}
+          style={{ marginTop: 12, fontSize: 13, padding: "8px 16px" }}
+        >
+          {expanded ? "Show less" : `Show all ${ordered.length}`}
+        </button>
+      )}
     </section>
   );
 }
@@ -1026,11 +1285,15 @@ function HabitMini({
   status,
   busy,
   onLog,
+  dragging,
+  onHandlePointerDown,
 }: {
   habit: HabitDefinition;
   status?: HabitComputedStatus;
   busy: boolean;
   onLog: (v: boolean | number | null) => void;
+  dragging: boolean;
+  onHandlePointerDown: (e: React.PointerEvent) => void;
 }) {
   const color = habit.color ?? "var(--activity)";
   const value = status?.value ?? null;
@@ -1039,19 +1302,34 @@ function HabitMini({
 
   let control: React.ReactNode;
   if (habit.targetType === "yes_no") {
-    const goodValue = habit.kind === "boost" ? true : false;
-    const isGood = value === goodValue;
-    control = (
-      <button
-        className="icon-btn"
-        disabled={busy}
-        aria-label={isGood ? "clear" : "mark done"}
-        onClick={() => onLog(isGood ? null : goodValue)}
-        style={isGood ? { background: color, color: "var(--bg)", borderColor: color } : undefined}
-      >
-        ✓
-      </button>
-    );
+    if (habit.kind === "avoid") {
+      // value false = avoided (nailed it); value true = slipped.
+      const nailed = value === false;
+      const slipped = value === true;
+      control = (
+        <div className="row" style={{ gap: 6 }}>
+          <button className="icon-btn" disabled={busy} title="Nailed it" aria-label="nailed it" onClick={() => onLog(nailed ? null : false)} style={nailed ? { background: "var(--activity)", color: "var(--bg)", borderColor: "var(--activity)" } : undefined}>
+            ✓
+          </button>
+          <button className="icon-btn" disabled={busy} title="I slipped" aria-label="i slipped" onClick={() => onLog(slipped ? null : true)} style={slipped ? { background: "var(--heart)", color: "var(--bg)", borderColor: "var(--heart)" } : undefined}>
+            ✕
+          </button>
+        </div>
+      );
+    } else {
+      const isGood = value === true;
+      control = (
+        <button
+          className="icon-btn"
+          disabled={busy}
+          aria-label={isGood ? "clear" : "mark done"}
+          onClick={() => onLog(isGood ? null : true)}
+          style={isGood ? { background: color, color: "var(--bg)", borderColor: color } : undefined}
+        >
+          ✓
+        </button>
+      );
+    }
   } else {
     const current = typeof value === "number" ? value : 0;
     const step =
@@ -1084,8 +1362,32 @@ function HabitMini({
   }
 
   return (
-    <div className="row" style={{ justifyContent: "space-between", gap: 10, opacity: busy ? 0.6 : 1 }}>
-      <div className="row" style={{ gap: 10, minWidth: 0 }}>
+    <div
+      data-habit-id={habit.id}
+      className="row"
+      style={{
+        justifyContent: "space-between",
+        gap: 10,
+        opacity: busy ? 0.6 : dragging ? 0.4 : 1,
+        borderRadius: 12,
+        outline: dragging ? `2px dashed ${color}` : "none",
+        background: dragging ? `color-mix(in srgb, ${color} 8%, var(--bg-raised))` : "transparent",
+        transition: "opacity 0.15s, background 0.15s",
+      }}
+    >
+      <div className="row" style={{ gap: 8, minWidth: 0 }}>
+        <span
+          onPointerDown={onHandlePointerDown}
+          aria-label="drag to reorder"
+          title="Drag to reorder"
+          style={{ cursor: "grab", color: "var(--ink-faint)", flex: "none", display: "flex", padding: "4px 3px", touchAction: "none", userSelect: "none" }}
+        >
+          <svg width="12" height="18" viewBox="0 0 12 18" fill="currentColor" aria-hidden>
+            <circle cx="3" cy="3" r="1.4" /><circle cx="9" cy="3" r="1.4" />
+            <circle cx="3" cy="9" r="1.4" /><circle cx="9" cy="9" r="1.4" />
+            <circle cx="3" cy="15" r="1.4" /><circle cx="9" cy="15" r="1.4" />
+          </svg>
+        </span>
         <IconChip icon={habitIcon(habit.iconKey)} color={completed ? color : "var(--ink-soft)"} size={24} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1096,7 +1398,12 @@ function HabitMini({
           </div>
         </div>
       </div>
-      {control}
+      <div className="row" style={{ gap: 8, flex: "none" }}>
+        <span aria-hidden title={completed ? "goal met" : "not met yet"} style={{ fontSize: 21 }}>
+          {completed ? "😊" : value == null ? "" : "😕"}
+        </span>
+        {control}
+      </div>
     </div>
   );
 }

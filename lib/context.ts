@@ -20,11 +20,15 @@ import {
   DaySummary,
   FoodEntry,
   MedicalRecord,
+  ReadinessScore,
   RemoteFoodEntry,
   TrendsPayload,
   WorkoutSession,
   WorkoutDetail,
 } from "./types";
+import { computeReadiness } from "./readiness";
+import { getGoals, buildAllProgress, formatGoalsForCoach } from "./goals";
+import { recentMeasurements, MEASUREMENT_LABELS } from "./measurements";
 import { formatDetail } from "./workout-detail";
 import {
   getHabitDefinitions,
@@ -146,6 +150,24 @@ export async function getRecentDays(n: number): Promise<{ days: DaySummary[]; de
   return { days, demo: false };
 }
 
+// Readiness baseline window. MUST match /api/daily-insights so the coach
+// quotes the SAME number the user sees on the Daily dial (not the coach's
+// shorter default display window).
+const READINESS_WINDOW = 45;
+
+/**
+ * App-derived readiness for `date` (default today), scored against the same
+ * 45-day rolling baseline as the Daily dial. Today is the last element of the
+ * window; `history` is the preceding days. Returns null if the date isn't in
+ * the window or no component can be scored. See lib/readiness.ts.
+ */
+export async function readinessForDate(date = localDateStr()): Promise<ReadinessScore | null> {
+  const { days } = await getRecentDays(READINESS_WINDOW);
+  const idx = days.findIndex((d) => d.date === date);
+  if (idx === -1) return null;
+  return computeReadiness(days[idx], days.slice(0, idx));
+}
+
 /** Trend series: archived days + a live fetch for only the unsettled window. */
 export async function getTrends(days: number): Promise<TrendsPayload | null> {
   if (!isConnected()) return null;
@@ -233,6 +255,25 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
   }
 
   const lines: string[] = [];
+
+  // App-derived readiness FIRST, scored against the same 45-day window as the
+  // Daily dial so the coach answers "am I recovered?" with the dial's number
+  // instead of re-reasoning from raw HRV/RHR (and possibly contradicting it).
+  try {
+    const readiness = await readinessForDate();
+    if (readiness) {
+      const drivers = readiness.reasons.length ? ` Drivers: ${readiness.reasons.join("; ")}.` : "";
+      const building = readiness.confident ? "" : " (baseline still building)";
+      lines.push(
+        "== Readiness (app-derived: HRV/RHR/sleep vs your baseline) ==",
+        `${readiness.score}/100 (${readiness.band}).${drivers}${building}`,
+        ""
+      );
+    }
+  } catch {
+    // readiness is optional context
+  }
+
   lines.push(`== Daily metrics (last ${days} days, oldest first) ==`);
   for (const d of range) lines.push(fmtDay(d));
 
@@ -305,6 +346,35 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     // habits are optional context
   }
 
+  // User-set macro goals (coach-visible only), with deterministic status. The
+  // coach explains/prioritizes these — it must not recompute or invent targets.
+  try {
+    const goals = getGoals();
+    const { progress } = await buildAllProgress(goals);
+    const goalsBlock = formatGoalsForCoach(goals, progress);
+    if (goalsBlock) lines.push("", goalsBlock);
+  } catch {
+    // goals are optional context
+  }
+
+  // Manually logged measurements (weight, glucose, body temp/fat, sleep) from
+  // the "+ Log" sheet — the user's hand-entered readings.
+  try {
+    const measurements = recentMeasurements({ limit: 12 });
+    if (measurements.length) {
+      lines.push("", "== Manually logged measurements (newest first) ==");
+      for (const m of measurements) {
+        const when = m.at.slice(0, 16).replace("T", " ");
+        const val = m.kind === "sleep" ? `${(m.value / 60).toFixed(1)}h` : `${m.value} ${m.unit}`;
+        const ctx = m.context ? ` (${m.context.replace("_", " ")})` : "";
+        const note = m.note ? ` — ${m.note}` : "";
+        lines.push(`${when}: ${MEASUREMENT_LABELS[m.kind]} ${val}${ctx}${note}`);
+      }
+    }
+  } catch {
+    // measurements are optional context
+  }
+
   if (records.length) {
     lines.push("", "== Medical records (AI summaries of user uploads) ==");
     for (const r of records) {
@@ -324,10 +394,11 @@ export const COACH_PERSONA = `You are the in-app AI Health Coach of HealthTrack.
 === CORE GUIDELINES ===
 
 1. BIOMARKER CORRELATION & ANALYSIS FRAMEWORK:
-   - Recovery & Readiness: Focus on the correlation between Heart Rate Variability (HRV) and Resting Heart Rate (RHR). If HRV drops and RHR increases, identify this as a sign of physiological stress, fatigue, or potential illness, and suggest active recovery or extra sleep.
+   - Recovery & Readiness: When the "== Readiness (app-derived…) ==" block is present, treat that score/band as the authoritative recovery read — it is the SAME number shown on the Daily dial. Quote it and base any advice on training intensity vs. recovery on it; do NOT re-derive a competing read from raw HRV/RHR or contradict the score. It is a morning snapshot from HRV, resting HR, and last night's sleep measured against the user's own baseline — not a live reading and NOT a Google-provided metric, so never call it Google's score. Use the underlying HRV–RHR correlation (HRV dropping while RHR rises = physiological stress, fatigue, or possible illness) to explain WHY the score reads as it does, and when readiness is low, suggest active recovery or extra sleep.
    - Sleep Quality: Do not just report total duration. Analyze sleep efficiency (target >85%), deep sleep duration (target 10-20%), and REM sleep (target 20-25%). If deep sleep is low, suggest sleep hygiene tips (cooler room, no screens, consistent bedtime).
    - Energy Balance: Look at "calories in" (nutrition logs) vs "calories out" (activity burn). Check protein, carbohydrate, and fat macros. Highlight positive patterns (like meeting protein targets) or identify energy deficits/surpluses relative to activity levels.
    - Cardiovascular Load: Correlate active zone minutes with steps. If activity is high, check if vitals (HRV, sleep) indicate the body is recovering well.
+   - Goals: When a "== Goals ==" block is present, treat each goal's status (met / on track / needs attention) as authoritative — it is computed deterministically from the user's latest value vs the target they set. Quote it; do NOT recompute it or invent/change targets. Prioritize "needs attention" goals with at most 1–2 practical micro-steps grounded in the number and gap shown. For lab-backed goals that stay out of range, frame it carefully and suggest they review it with their clinician — never diagnose.
 
 2. STYLE & COMMUNICATION PROTOCOL:
    - Extreme Brevity: Your total text response must be under 3-4 sentences. Avoid long walls of text; utilize visual cards to convey stats and let them do the heavy lifting.

@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ThemeToggle from "@/components/ThemeToggle";
-import AvatarMenu from "@/components/AvatarMenu";
 import { IconChip, habitIcon, HABIT_ICON_KEYS } from "@/components/icons";
 import {
   HabitDefinition,
@@ -80,21 +78,16 @@ export default function HabitsPage() {
 
   return (
     <main className="page">
-      <header className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
-        <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700 }}>Habits</h1>
-          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 2 }}>
-            Build the good ones, stay within limits on the rest.
-          </p>
-        </div>
-        <div className="row" style={{ gap: 10 }}>
-          <button className="btn" onClick={() => setEditing("new")}>
-            + New habit
-          </button>
-          <ThemeToggle />
-          <AvatarMenu />
-        </div>
+      <header className="rise rise-1" style={{ marginBottom: 14 }}>
+        <h1 className="page-title">Habits.</h1>
+        <p className="page-sub">Build the good ones, stay within limits on the rest.</p>
       </header>
+
+      <div className="row" style={{ justifyContent: "flex-end", marginBottom: 14 }}>
+        <button className="btn" onClick={() => setEditing("new")}>
+          + New habit
+        </button>
+      </div>
 
       {!payload ? (
         <p style={{ color: "var(--ink-soft)" }}>Loading…</p>
@@ -253,7 +246,10 @@ function HabitRow({
 
       <div className="row" style={{ justifyContent: "space-between", marginTop: 14, gap: 12, flexWrap: "wrap" }}>
         <HabitControl habit={habit} value={value} busy={busy} onLog={onLog} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: stateColor }}>{stateLabel}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: stateColor, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span aria-hidden style={{ fontSize: 22 }}>{completed ? "😊" : value == null ? "" : "😕"}</span>
+          {stateLabel}
+        </span>
       </div>
     </section>
   );
@@ -274,22 +270,27 @@ function HabitControl({
   const color = habit.color ?? "var(--activity)";
 
   if (habit.targetType === "yes_no") {
-    // boost: "done" => value true. avoid: "avoided" => value false (behavior didn't occur).
-    const goodValue = habit.kind === "boost" ? true : false;
-    const isGood = value === goodValue;
-    const label = habit.kind === "boost" ? (isGood ? "Done ✓" : "Mark done") : isGood ? "Avoided ✓" : "Mark avoided";
+    const ghost = { background: "transparent", color: "var(--ink)", border: "1px solid var(--hairline)" } as const;
+    if (habit.kind === "avoid") {
+      // value false = avoided (nailed it / met); value true = the behavior happened (slipped).
+      const nailed = value === false;
+      const slipped = value === true;
+      return (
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn" disabled={busy} onClick={() => onLog(nailed ? null : false)} style={nailed ? { background: "var(--activity)", color: "var(--bg)", borderColor: "var(--activity)" } : ghost}>
+            ✓ Nailed it
+          </button>
+          <button className="btn" disabled={busy} onClick={() => onLog(slipped ? null : true)} style={slipped ? { background: "var(--heart)", color: "var(--bg)", borderColor: "var(--heart)" } : ghost}>
+            ✗ I slipped
+          </button>
+        </div>
+      );
+    }
+    // boost: value true = done.
+    const isGood = value === true;
     return (
-      <button
-        className="btn"
-        disabled={busy}
-        onClick={() => onLog(isGood ? null : goodValue)}
-        style={
-          isGood
-            ? { background: color, color: "var(--bg)" }
-            : { background: "transparent", color: "var(--ink)", border: "1px solid var(--hairline)" }
-        }
-      >
-        {label}
+      <button className="btn" disabled={busy} onClick={() => onLog(isGood ? null : true)} style={isGood ? { background: color, color: "var(--bg)" } : ghost}>
+        {isGood ? "Nailed it ✓" : "Mark done"}
       </button>
     );
   }
@@ -477,7 +478,7 @@ function HabitEditor({
         display: "flex",
         alignItems: "flex-end",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 100, // above the floating bottom nav (z-index 50)
         padding: 0,
       }}
     >
@@ -490,6 +491,8 @@ function HabitEditor({
           overflowY: "auto",
           borderBottomLeftRadius: 0,
           borderBottomRightRadius: 0,
+          // clear the home-indicator / safe area so the action row isn't flush to the edge
+          paddingBottom: "max(18px, env(safe-area-inset-bottom))",
         }}
       >
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 16 }}>

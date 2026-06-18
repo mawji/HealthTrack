@@ -48,14 +48,39 @@ function slugify(name: string): string {
 
 // ── definitions ────────────────────────────────────────────────────────────
 
-/** Load habit definitions, seeding the example set on first run only. */
+/** Stable display order: habits with an explicit sortOrder first (ascending),
+ *  then any without, preserving their stored order. */
+function sortHabits(habits: HabitDefinition[]): HabitDefinition[] {
+  const N = habits.length;
+  return habits
+    .map((h, i) => ({ h, key: h.sortOrder ?? N + i }))
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.h);
+}
+
+/** Load habit definitions (in display order), seeding examples on first run. */
 export function getHabitDefinitions(): HabitDefinition[] {
   if (!fs.existsSync(dataPath(HABITS))) {
     const seeded = seedHabits();
     writeJson(HABITS, seeded);
     return seeded;
   }
-  return readJson<HabitDefinition[]>(HABITS, []);
+  return sortHabits(readJson<HabitDefinition[]>(HABITS, []));
+}
+
+/** Apply a new manual order. `ids` is a desired ordering of some habits; those
+ *  habits are reordered among the slots they currently occupy (non-listed
+ *  habits keep their positions), then every habit gets a fresh sortOrder. */
+export function reorderHabits(ids: string[]): HabitDefinition[] {
+  const current = getHabitDefinitions();
+  const provided = new Set(ids.filter((id) => current.some((h) => h.id === id)));
+  const queue = ids.filter((id) => provided.has(id));
+  const newOrderIds = current.map((h) => (provided.has(h.id) ? queue.shift()! : h.id));
+  const byId = new Map(current.map((h) => [h.id, h]));
+  const now = new Date().toISOString();
+  const reordered = newOrderIds.map((id, i) => ({ ...byId.get(id)!, sortOrder: i, updatedAt: now }));
+  saveHabitDefinitions(reordered);
+  return reordered;
 }
 
 export function saveHabitDefinitions(habits: HabitDefinition[]) {
@@ -107,6 +132,7 @@ export function sanitizeHabitDefinition(
     showOnDaily: bool(r.showOnDaily, existing?.showOnDaily ?? true),
     coachVisible: bool(r.coachVisible, existing?.coachVisible ?? true),
     nudgeEnabled: bool(r.nudgeEnabled, existing?.nudgeEnabled ?? false),
+    sortOrder: existing?.sortOrder, // managed by reorderHabits, never set from body
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

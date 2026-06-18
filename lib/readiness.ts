@@ -12,6 +12,11 @@
 //   - RHR and sleep are secondary (their information overlaps HRV per WHOOP).
 // This is deterministic and explainable; the AI only phrases the result.
 //
+// The scoring has four deliberate refinements (HRV stability plateau, HRV–RHR
+// decoupling guard, weakest-link aggregation, acute short-sleep penalty). Their
+// evidence basis and the tunable knobs are documented in detail in
+// docs/readiness-scoring.md — read that before changing the constants here.
+//
 // See plans/daily-trends-ai-suggestions.md and the readiness-score-methodology
 // memory.
 
@@ -62,6 +67,34 @@ function durationSub(durationMin: number): number {
   return clamp(85 + ((durationMin - 420) / 60) * 20);
 }
 
+/**
+ * HRV sub-score with a PLATEAU above the personal normal band (refinement #1).
+ * Readiness is HRV *stability*, not "higher is better" (Altini/HRV4Training):
+ * at/above the normal band is good, but a spike above earns NO extra credit;
+ * dropping below the band is penalized, steeply once outside it. `z` is
+ * ln(rMSSD) standardized to the rolling baseline. See docs/readiness-scoring.md.
+ */
+function hrvSub(z: number): number {
+  if (z >= 0) return clamp(80 + Math.min(z, 1) * 5); // at/above baseline → 80–85 plateau
+  if (z >= -0.75) return clamp(80 + z * 8); // within the normal band → gentle 80→74
+  return clamp(74 + (z + 0.75) * 45); // below the normal band → steep penalty
+}
+
+/**
+ * Sleep sub-score: duration-led (0.8) + efficiency (0.2), with an acute
+ * short-sleep penalty below 5h (refinement #4). Sleep-deprivation research
+ * treats <5–6h as a strong next-day impairment, so a high efficiency must not
+ * mask a short night. See docs/readiness-scoring.md.
+ */
+function sleepSub(durationMin: number, efficiency: number): number {
+  let s = 0.8 * durationSub(durationMin) + 0.2 * clamp(efficiency);
+  if (durationMin < 300) {
+    const deficitH = (300 - durationMin) / 60; // hours under the 5h floor
+    s *= Math.max(0.4, 1 - deficitH * 0.25); // up to −60% for very short nights
+  }
+  return clamp(s);
+}
+
 function bandFor(score: number): ReadinessBand {
   if (score < 34) return "low";
   if (score < 67) return "fair";
@@ -85,49 +118,72 @@ export function computeReadiness(today: DaySummary, history: DaySummary[]): Read
   const reasons: string[] = [];
   let metric = "";
 
-  // HRV (primary). ln-transform; baseline mean ± 0.75 SD normal band.
+  // Standardize each signal against its own rolling baseline first.
   const hrvHist = history.map((d) => d.hrv).filter((v): v is number => v != null && v > 0);
   const lnStat = stats(hrvHist.map((v) => Math.log(v)));
-  if (today.hrv != null && today.hrv > 0 && lnStat.n >= 3) {
-    const z = zscore(Math.log(today.hrv), lnStat);
-    parts.push({ score: subScore(z, 1), weight: 0.5 });
-    const [lo, hi] = hrvNormalRange(lnStat);
-    const norm = `${Math.round(lo)}–${Math.round(hi)}ms`;
-    if (z < -0.75) {
-      reasons.push(`HRV ${today.hrv}ms is below your normal ${norm}`);
-      metric = metric || `HRV ${today.hrv}ms below ${norm} normal`;
-    } else if (z > 0.75) {
-      reasons.push(`HRV ${today.hrv}ms is above your normal ${norm}`);
-      metric = metric || `HRV ${today.hrv}ms above ${norm} normal`;
-    }
-  }
+  const zHrv =
+    today.hrv != null && today.hrv > 0 && lnStat.n >= 3 ? zscore(Math.log(today.hrv), lnStat) : null;
 
-  // RHR (secondary; lower is better).
   const rhrHist = history.map((d) => d.restingHeartRate).filter((v): v is number => v != null && v > 0);
   const rhrStat = stats(rhrHist);
-  if (today.restingHeartRate != null && rhrStat.n >= 3) {
-    const z = zscore(today.restingHeartRate, rhrStat);
-    parts.push({ score: subScore(z, -1), weight: 0.25 });
-    if (z > 0.75) {
-      const up = Math.round(today.restingHeartRate - rhrStat.mean);
+  const zRhr =
+    today.restingHeartRate != null && rhrStat.n >= 3
+      ? zscore(today.restingHeartRate, rhrStat)
+      : null;
+
+  // HRV (primary, weight 0.5). Stability-plateau scoring (refinement #1).
+  if (zHrv != null) {
+    let s = hrvSub(zHrv);
+    const [lo, hi] = hrvNormalRange(lnStat);
+    const norm = `${Math.round(lo)}–${Math.round(hi)}ms`;
+    // Decoupling guard (refinement #2): a high-HRV spike that coincides with an
+    // ELEVATED resting HR is not genuine recovery (parasympathetic saturation /
+    // short-night artifact), so it must not score as "recovered".
+    const decoupled = zHrv > 0.75 && zRhr != null && zRhr > 0.75;
+    if (decoupled) {
+      s = Math.min(s, 55);
+      reasons.push(`HRV ${today.hrv}ms is elevated but resting HR is up too — reads as strain, not recovery`);
+      metric = metric || "Elevated HRV alongside a raised resting HR — likely strain, not recovery";
+    } else if (zHrv < -0.75) {
+      reasons.push(`HRV ${today.hrv}ms is below your normal ${norm}`);
+      metric = metric || `HRV ${today.hrv}ms below ${norm} normal`;
+    } else if (zHrv > 0.75) {
+      reasons.push(`HRV ${today.hrv}ms is above your normal ${norm}`);
+    }
+    parts.push({ score: s, weight: 0.5 });
+  }
+
+  // RHR (secondary, weight 0.25; lower is better).
+  if (zRhr != null) {
+    parts.push({ score: subScore(zRhr, -1), weight: 0.25 });
+    if (zRhr > 0.75) {
+      const up = Math.round(today.restingHeartRate! - rhrStat.mean);
       reasons.push(`resting HR is ${up}bpm above your ${Math.round(rhrStat.mean)}bpm average`);
+      metric = metric || `Resting HR ${up}bpm above your ${Math.round(rhrStat.mean)}bpm average`;
     }
   }
 
-  // Sleep (secondary): last night duration + efficiency.
+  // Sleep (secondary, weight 0.25): duration-led with acute short-sleep penalty.
   if (today.sleep) {
-    const dur = durationSub(today.sleep.durationMin);
-    const eff = clamp(today.sleep.efficiency);
-    parts.push({ score: 0.7 * dur + 0.3 * eff, weight: 0.25 });
+    parts.push({ score: sleepSub(today.sleep.durationMin, today.sleep.efficiency), weight: 0.25 });
     const hrs = (today.sleep.durationMin / 60).toFixed(1);
-    if (today.sleep.durationMin < 390) reasons.push(`only ${hrs}h sleep last night`);
-    else if (today.sleep.efficiency < 85) reasons.push(`sleep efficiency ${today.sleep.efficiency}% (target >85%)`);
+    if (today.sleep.durationMin < 360) {
+      reasons.push(`only ${hrs}h sleep last night`);
+      metric = metric || `Only ${hrs}h sleep last night`;
+    } else if (today.sleep.efficiency < 85) {
+      reasons.push(`sleep efficiency ${today.sleep.efficiency}% (target >85%)`);
+    }
   }
 
   if (parts.length === 0) return null;
 
+  // Aggregation (refinement #3): blend the weighted mean toward the WORST
+  // component, so one severely under-recovered system caps overall readiness
+  // rather than being averaged away by a strong one.
   const wSum = parts.reduce((a, p) => a + p.weight, 0);
-  const score = Math.round(parts.reduce((a, p) => a + p.score * p.weight, 0) / wSum);
+  const weightedMean = parts.reduce((a, p) => a + p.score * p.weight, 0) / wSum;
+  const worst = Math.min(...parts.map((p) => p.score));
+  const score = Math.round(0.6 * weightedMean + 0.4 * worst);
   const band = bandFor(score);
 
   if (!metric) {

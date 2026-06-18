@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson, localDateStr, APP_TZ } from "./store";
+import { applyDeviceOverrides } from "./devices";
 import { EXERCISE_TYPE_SET } from "./workout-types";
 import {
   DaySummary,
@@ -36,6 +37,9 @@ const SCOPES = [
   // Manual workout logging (chat + journal). Added later than the read
   // scopes — reconnect Google Health once to grant it.
   "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.writeonly",
+  // Manual measurement write-back (weight/glucose/body-temp/body-fat from the
+  // "+ Log" sheet). Also added later — reconnect once to grant it.
+  "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.writeonly",
   // Settings page: units, timezone, profile, paired devices.
   "https://www.googleapis.com/auth/googlehealth.profile.readonly",
   "https://www.googleapis.com/auth/googlehealth.settings.readonly",
@@ -854,6 +858,46 @@ export async function logWaterToGoogleHealth(ml: number, at: Date): Promise<stri
   }
 }
 
+// -- Manual measurements (weight, glucose, body temp, body fat) --
+// Instantaneous observation dataPoints under the health-metrics writeonly scope.
+// Field shapes follow the v4 reference (weight in grams, glucose in mg/dL,
+// temperature in °C, body fat %); each carries an ObservationSampleTime. Guarded
+// by the granted scope so they no-op (local-only) until the user reconnects.
+
+const METRICS_WRITE = "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.writeonly";
+
+function sampleTime(at: Date) {
+  return { physicalTime: at.toISOString(), utcOffset: utcOffsetDuration(at) };
+}
+
+async function canWriteMetrics(): Promise<boolean> {
+  try {
+    return (await grantedScopes()).includes(METRICS_WRITE);
+  } catch {
+    return false;
+  }
+}
+
+async function postObservation(dataType: string, body: Record<string, unknown>): Promise<string | null> {
+  if (!isConnected() || !(await canWriteMetrics())) return null;
+  try {
+    const res = await gFetch(`/users/me/dataTypes/${dataType}/dataPoints`, { method: "POST", body });
+    return createdName(res);
+  } catch {
+    return null;
+  }
+}
+
+// Only weight and body-fat accept dataPoints:create for third-party clients.
+// blood-glucose and core-body-temperature return "Create is not supported"
+// (read/reconcile only), so those stay local-only — verified against the live API.
+export function logWeightToGoogleHealth(kg: number, at: Date): Promise<string | null> {
+  return postObservation("weight", { weight: { weightGrams: Math.round(kg * 1000), sampleTime: sampleTime(at) } });
+}
+export function logBodyFatToGoogleHealth(percentage: number, at: Date): Promise<string | null> {
+  return postObservation("body-fat", { bodyFat: { percentage, sampleTime: sampleTime(at) } });
+}
+
 /** Deletes a previously created dataPoint (used by the water "-" button). */
 export async function deleteDataPoint(dataType: string, name: string): Promise<boolean> {
   const res = await gFetch(`/users/me/dataTypes/${dataType}/dataPoints:batchDelete`, {
@@ -967,8 +1011,15 @@ export async function fetchAccount(): Promise<{
   return {
     profile,
     settings,
-    devices: devices?.pairedDevices ?? devices?.devices ?? [],
+    devices: applyDeviceOverrides(devices?.pairedDevices ?? devices?.devices ?? []),
   };
+}
+
+/** Just the paired devices (with local label overrides applied) — one API
+ *  call, for the global battery indicator. */
+export async function fetchPairedDevices(): Promise<any[]> {
+  const devices = await gFetch("/users/me/pairedDevices");
+  return applyDeviceOverrides(devices?.pairedDevices ?? devices?.devices ?? []);
 }
 
 /** Google account name + photo (needs openid/userinfo.profile; cached). */

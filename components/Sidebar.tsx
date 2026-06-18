@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import BatteryIndicator from "./BatteryIndicator";
 import { NAV_ITEMS } from "./navItems";
 import Logo from "./Logo";
+import ThemeToggle from "./ThemeToggle";
 
 /** Desktop sidebar — Apple-Health-style category list with colored icons. */
 export default function Sidebar() {
@@ -31,6 +33,7 @@ export default function Sidebar() {
         </Link>
       ))}
       <div className="side-foot">
+        <ThemeToggle variant="sidelink" />
         <Link href="/settings" className={`side-link ${pathname === "/settings" ? "active" : ""}`}>
           <span className="side-icon" style={{ background: "color-mix(in srgb, var(--ink) 9%, transparent)", color: "var(--ink-soft)" }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -40,7 +43,10 @@ export default function Sidebar() {
           </span>
           Settings
         </Link>
-        <span style={{ fontSize: 11, color: "var(--ink-faint)", padding: "0 10px" }}>local · private</span>
+        <div style={{ padding: "8px 10px 0", borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 6 }}>
+          <BatteryIndicator showLabel={true} />
+          <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>local · private</span>
+        </div>
       </div>
     </aside>
   );

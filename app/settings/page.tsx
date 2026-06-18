@@ -114,6 +114,21 @@ export default function Settings() {
   const [backfillPct, setBackfillPct] = useState<number | null>(null);
   const [backfillErr, setBackfillErr] = useState<string | null>(null);
 
+  // Auto-refresh state
+  const [autoRefresh, setAutoRefresh] = useState("5");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("ht-auto-refresh");
+    if (saved) {
+      setAutoRefresh(saved);
+    }
+  }, []);
+
+  const handleAutoRefreshChange = (value: string) => {
+    setAutoRefresh(value);
+    localStorage.setItem("ht-auto-refresh", value);
+  };
+
   // AI provider state
   const [ai, setAi]                 = useState<AiPayload | null>(null);
   const [aiExpanded, setAiExpanded] = useState<ProviderType | null>(null);
@@ -289,9 +304,579 @@ export default function Settings() {
 
   const s = data?.settings;
 
+  const [activeTab, setActiveTab] = useState<"integrations" | "ai" | "preferences" | "archive">("integrations");
+
+  useEffect(() => {
+    if (archive?.backfill) {
+      setBackfillPct(archive.backfill.pct);
+    } else if (archive) {
+      setBackfillPct(null);
+    }
+  }, [archive]);
+
+  function renderIntegrations() {
+    if (!data) return null;
+    const isGhealthConnected = data.connected;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        {/* Connection Map Visualizer */}
+        <div className="connection-map rise rise-2">
+          <div className="connection-node">
+            <div className="connection-node-icon" style={{ background: "var(--heart-soft)", color: "var(--heart)" }}>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20s-7-4.4-9-8.5C1.4 8.2 3.2 5 6.6 5c2 0 3.3 1 4.4 2.4h2C14.1 6 15.4 5 17.4 5c3.4 0 5.2 3.2 3.6 6.5-2 4.1-9 8.5-9 8.5z" />
+              </svg>
+            </div>
+            <span>Google Health</span>
+          </div>
+          <div className={`connection-bridge ${isGhealthConnected ? "connected" : "disconnected"}`} />
+          <div className="connection-node">
+            <div className="connection-node-icon" style={{
+              background: "var(--activity-soft)",
+              color: "var(--activity)",
+              border: isGhealthConnected ? "1.5px solid var(--activity)" : "1.5px solid transparent"
+            }}>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+            </div>
+            <span>HealthTrack</span>
+          </div>
+        </div>
+
+        <section className="card rise rise-3">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="card-label">
+              <IconChip icon={HeartIcon} color="var(--heart)" />
+              Connection Status
+            </div>
+            <span className="badge" style={{
+              background: data.connected ? "var(--activity-soft)" : "var(--food-soft)",
+              color:      data.connected ? "var(--activity)"      : "var(--food)",
+            }}>
+              {data.connected ? "connected" : data.configured ? "not connected" : "no credentials"}
+            </span>
+          </div>
+
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.6 }}>
+            Synchronize raw health telemetry data, workouts, sleep, and measurements directly from your Google Health data.
+          </p>
+
+          {data.connected && (
+            <div style={{ marginTop: 20 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink-soft)", marginBottom: 10 }}>
+                Synchronized Permissions
+              </h3>
+              <div className="stack" style={{ gap: 8 }}>
+                {data.permissions.map((p) => (
+                  <div key={p.label} className="row" style={{ justifyContent: "space-between", fontSize: 13.5, background: "var(--bg-inset)", padding: "10px 14px", borderRadius: 12, border: "1px solid var(--hairline)" }}>
+                    <span style={{ color: "var(--ink-soft)" }}>{p.label}</span>
+                    <span style={{ color: p.granted ? "var(--activity)" : "var(--food)", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                      {p.granted ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                          Granted
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                          Missing
+                        </>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.needsReconnect && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "color-mix(in srgb, var(--food) 10%, var(--bg-raised))", border: "1px solid color-mix(in srgb, var(--food) 30%, transparent)", padding: "12px 14px", borderRadius: 12, marginTop: 16 }}>
+              <span style={{ color: "var(--food)" }}>⚠️</span>
+              <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+                Some permissions were added after you first connected. Please reconnect once to grant them.
+              </p>
+            </div>
+          )}
+
+          <div className="row" style={{ gap: 10, marginTop: 20 }}>
+            <a className="btn" href="/api/googlehealth/auth" style={{
+              background: data.needsReconnect ? "var(--food)" : "var(--ink)",
+              color: data.needsReconnect ? "var(--bg)" : "var(--bg)",
+              textDecoration: "none", flex: 1, textAlign: "center",
+            }}>
+              {data.connected ? "Refresh Permissions" : "Connect Google Health"}
+            </a>
+            {data.connected && (
+              <button className="btn btn-ghost" onClick={disconnect} disabled={busy}>Disconnect</button>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderAi() {
+    if (!data) return null;
+    const isAiConfigured = data.aiConfigured;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        <section className="card rise rise-2">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="card-label">
+              <IconChip icon={LungsIcon} color="var(--breath)" />
+              AI Engine
+            </div>
+            {isAiConfigured && (
+              <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
+                {data.aiProviderName}
+              </span>
+            )}
+          </div>
+          
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.6 }}>
+            Connect a language model to power the Health Coach and automated food analysis. Vision-capable models are recommended to parse meal photos.
+          </p>
+
+          {!ai ? (
+            <p className="pulsing" style={{ color: "var(--ink-soft)", marginTop: 16, fontSize: 13 }}>Loading providers…</p>
+          ) : (
+            <div className="stack" style={{ gap: 12, marginTop: 20 }}>
+              {(Object.keys(ai.providers) as ProviderType[]).map((p) => {
+                const info      = ai.providers[p];
+                const isActive  = ai.active === p;
+                const isExpanded = aiExpanded === p;
+                const isOAuth   = p === "openai-oauth";
+                const isOllama  = p === "ollama";
+                const isKeyProv = KEY_PROVIDERS.includes(p);
+
+                return (
+                  <div key={p} className={`provider-card ${isActive ? "active" : ""}`} style={{
+                    border: `1.5px solid ${isActive ? "var(--activity)" : "var(--hairline)"}`,
+                    borderRadius: 16,
+                    padding: "14px 16px",
+                    background: isActive ? "var(--activity-soft)" : "var(--bg-inset)",
+                    transition: "all 0.25s ease"
+                  }}>
+                    {/* Header row */}
+                    <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 700, fontSize: 14.5 }}>{info.label}</span>
+                        {isActive && (
+                          <span className="badge" style={{ background: "var(--activity)", color: "var(--bg)", fontSize: 10.5, padding: "2px 8px" }}>Active</span>
+                        )}
+                        {info.fromEnv && !isActive && (
+                          <span className="badge" style={{ background: "var(--ink-faint)", color: "var(--ink-soft)", fontSize: 10.5, padding: "2px 8px" }}>.env file</span>
+                        )}
+                        {info.configured && !isActive && (
+                          <span className="badge" style={{ background: "var(--sleep-soft)", color: "var(--sleep)", fontSize: 10.5, padding: "2px 8px" }}>Ready</span>
+                        )}
+                      </div>
+
+                      <div className="row" style={{ gap: 6 }}>
+                        {info.configured && !isActive && (
+                          <button className="btn" style={{ fontSize: 12, padding: "5px 12px", background: "var(--ink)", color: "var(--bg)" }}
+                            onClick={() => activateProvider(p)}>
+                            Activate
+                          </button>
+                        )}
+                        {isOAuth && !deviceFlow && (
+                          <button className="btn" style={{ fontSize: 12, padding: "5px 12px" }}
+                            onClick={startDeviceCode} disabled={deviceStarting}>
+                            {deviceStarting ? "…" : info.configured ? "Reconnect" : "Connect"}
+                          </button>
+                        )}
+                        {isOAuth && deviceFlow && (
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }}
+                            onClick={cancelDeviceFlow}>
+                            Cancel
+                          </button>
+                        )}
+                        {!isOAuth && (
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: "5px 12px" }}
+                            onClick={() => openAiForm(p)}>
+                            {isExpanded ? "Close" : info.configured ? "Edit" : "Configure"}
+                          </button>
+                        )}
+                        {info.configured && !info.fromEnv && (
+                          <button className="btn btn-ghost"
+                            style={{ fontSize: 12, padding: "5px 8px", color: "var(--heart)", borderColor: "transparent" }}
+                            onClick={() => disconnectAiProvider(p)}
+                            title="Disconnect credentials"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Model details display */}
+                    {info.configured && !isExpanded && (
+                      <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--ink-soft)", display: "flex", gap: 12 }}>
+                        <span>🤖 {info.model}</span>
+                        {info.visionModel && info.visionModel !== info.model && (
+                          <span>👁️ {info.visionModel}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Select OAuth model */}
+                    {isOAuth && info.configured && (
+                      <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 12 }}>
+                        <label style={{ fontSize: 12, color: "var(--ink-soft)", fontWeight: 600 }}>Model Selection</label>
+                        <select className="field" value={info.model}
+                          onChange={(e) => selectOAuthModel(p, e.target.value)}
+                          style={{ flex: 1, padding: "6px 10px", borderRadius: 8, fontSize: 13 }}>
+                          {OPENAI_OAUTH_MODELS.map((m) => (
+                            <option key={m.id} value={m.id}>{m.label}</option>
+                          ))}
+                          {!OPENAI_OAUTH_MODELS.some((m) => m.id === info.model) && (
+                            <option value={info.model}>{info.model} (current)</option>
+                          )}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Hint when not configured */}
+                    {!info.configured && !isExpanded && !deviceFlow && (
+                      <p style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 6 }}>{providerHint(p)}</p>
+                    )}
+
+                    {/* Device flow code container */}
+                    {isOAuth && deviceFlow && (
+                      <div style={{
+                        marginTop: 12,
+                        background: "var(--bg)",
+                        border: "1px solid var(--hairline)",
+                        borderRadius: 12,
+                        padding: "14px",
+                      }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, fontStyle: "normal", marginBottom: 4 }}>
+                          Link your ChatGPT subscription
+                        </p>
+                        <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 12, lineHeight: 1.5 }}>
+                          1. Navigate to <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer" style={{ color: "var(--activity)", textDecoration: "underline" }}>{deviceFlow.verificationUri}</a>
+                          <br />
+                          2. Enter the code below when requested:
+                        </p>
+                        
+                        {/* Digital verification display */}
+                        <div style={{ position: "relative" }}>
+                          <div className="digit-container">
+                            {deviceFlow.userCode.split("").map((char, index) => (
+                              <div key={index} className="digit-box">{char}</div>
+                            ))}
+                          </div>
+                          
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "3px 8px", position: "absolute", right: 0, top: -4 }} onClick={() => {
+                            navigator.clipboard.writeText(deviceFlow.userCode);
+                          }}>
+                            Copy
+                          </button>
+                        </div>
+                        
+                        <p className="pulsing" style={{ fontSize: 12, color: "var(--ink-soft)", textAlign: "center", marginTop: 12 }}>
+                          Waiting for device authorization response…
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Config Form fields */}
+                    {isExpanded && !isOAuth && (
+                      <div className="stack" style={{ gap: 10, marginTop: 14 }}>
+                        {isKeyProv && !isOllama && (
+                          <div>
+                            <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4, fontWeight: 600 }}>
+                              {providerKeyLabel(p)}
+                            </label>
+                            <input type="password" className="field"
+                              placeholder={providerKeyPlaceholder(p)}
+                              value={aiKey} onChange={(e) => setAiKey(e.target.value)}
+                              style={{ width: "100%" }} />
+                          </div>
+                        )}
+                        {isOllama && (
+                          <div>
+                            <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4, fontWeight: 600 }}>
+                              Ollama Base URL
+                            </label>
+                            <input type="url" className="field" placeholder="http://localhost:11434"
+                              value={aiUrl} onChange={(e) => setAiUrl(e.target.value)}
+                              style={{ width: "100%" }} />
+                          </div>
+                        )}
+                        <div className="row" style={{ gap: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4, fontWeight: 600 }}>
+                              {isOllama ? "Text model" : "Model ID (optional)"}
+                            </label>
+                            <input type="text" className="field"
+                              placeholder={isOllama ? "llama3.2" : `default: ${info.model}`}
+                              value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4, fontWeight: 600 }}>
+                              {isOllama ? "Vision model" : "Vision ID (optional)"}
+                            </label>
+                            <input type="text" className="field"
+                              placeholder={isOllama ? "llava" : `default: ${info.visionModel}`}
+                              value={aiVModel} onChange={(e) => setAiVModel(e.target.value)} />
+                          </div>
+                        </div>
+                        <p style={{ fontSize: 12, color: "var(--ink-faint)", lineHeight: 1.4 }}>{providerHint(p)}</p>
+                        {aiErr && <p style={{ fontSize: 12.5, color: "var(--heart)", fontWeight: 600 }}>⚠️ {aiErr}</p>}
+                        
+                        <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                          <button className="btn" disabled={aiSaving || (!aiKey && !isOllama)}
+                            onClick={() => saveAiProvider(p)} style={{ flex: 1 }}>
+                            {aiSaving ? "Saving…" : "Save & Activate"}
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => setAiExpanded(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Device flow error */}
+                    {isOAuth && deviceErr && !deviceFlow && (
+                      <p style={{ fontSize: 12.5, color: "var(--heart)", marginTop: 10, fontWeight: 600 }}>⚠️ {deviceErr}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  function renderPreferences() {
+    if (!data) return null;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        {/* Global Preferences */}
+        <section className="card rise rise-2">
+          <div className="card-label" style={{ marginBottom: 14 }}>
+            <IconChip icon={LungsIcon} color="var(--breath)" />
+            App Preferences
+          </div>
+
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="row" style={{ justifyContent: "space-between", background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Theme Mode</span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Select light or dark user interface</span>
+              </div>
+              <ThemeToggle />
+            </div>
+
+            {/* Auto Refresh Row */}
+            <div className="row" style={{ justifyContent: "space-between", background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Auto Refresh</span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Interval to sync telemetry in background</span>
+              </div>
+              <select
+                value={autoRefresh}
+                onChange={(e) => handleAutoRefreshChange(e.target.value)}
+                className="field"
+                style={{
+                  width: 150,
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: "1px solid var(--hairline)",
+                  background: "var(--bg-inset)",
+                  color: "var(--ink)",
+                  fontSize: 13.5,
+                }}
+              >
+                <option value="disabled">Disabled</option>
+                <option value="1">Every 1 minute</option>
+                <option value="5">Every 5 minutes</option>
+                <option value="15">Every 15 minutes</option>
+                <option value="30">Every 30 minutes</option>
+              </select>
+            </div>
+
+            <div className="row" style={{ justifyContent: "space-between", background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Timezone</span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Local database mapping timezone</span>
+              </div>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{data.timezone}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Metric Units Grid */}
+        {(data.profile || s) && (
+          <section className="card rise rise-3">
+            <div className="card-label">
+              <IconChip icon={ScaleIcon} color="var(--food)" />
+              Account & Measurement Units
+            </div>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 8 }}>
+              User profile statistics and system units imported directly from your Google Health settings.
+            </p>
+
+            <div className="pref-grid">
+              {data.profile?.age != null && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Age</span>
+                  <span className="pref-card-value">{data.profile.age} yrs</span>
+                </div>
+              )}
+              {data.profile?.membershipStartDate && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Member Since</span>
+                  <span className="pref-card-value">{data.profile.membershipStartDate.year}</span>
+                </div>
+              )}
+              {unit(s?.weightUnit) && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Weight</span>
+                  <span className="pref-card-value">{unit(s.weightUnit)}</span>
+                </div>
+              )}
+              {unit(s?.distanceUnit) && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Distance</span>
+                  <span className="pref-card-value">{unit(s.distanceUnit)}</span>
+                </div>
+              )}
+              {unit(s?.waterUnit) && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Water</span>
+                  <span className="pref-card-value">{unit(s.waterUnit)}</span>
+                </div>
+              )}
+              {unit(s?.temperatureUnit) && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Temp</span>
+                  <span className="pref-card-value">{unit(s.temperatureUnit)}</span>
+                </div>
+              )}
+              {s?.languageLocale && (
+                <div className="pref-card">
+                  <span className="pref-card-label">Locale</span>
+                  <span className="pref-card-value">{s.languageLocale}</span>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Connected Devices */}
+        {data.devices && data.devices.length > 0 && (
+          <section className="card rise rise-4">
+            <div className="card-label">
+              <IconChip icon={ScaleIcon} color="var(--sleep)" />
+              Paired Devices
+            </div>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 8, marginBottom: 14 }}>
+              External sensors, smart rings, and wearables. Click the edit pencil to rename them locally.
+            </p>
+            <div className="stack" style={{ gap: 10 }}>
+              {data.devices.map((d: any, i: number) => (
+                <DeviceRow key={i} index={i} device={d} onSaved={load} />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
+
+  function renderArchive() {
+    if (!data) return null;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        <section className="card rise rise-2">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="card-label">
+              <IconChip icon={ScaleIcon} color="var(--sleep)" />
+              Local Data Archive
+            </div>
+            {archive && archive.coverage.days > 0 && (
+              <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
+                {archive.coverage.days} days cached
+              </span>
+            )}
+          </div>
+          
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.6 }}>
+            Days older than 3 days are cached inside a local SQLite database (`archive.db`). This allows near-instant loading of historical trends without making slow round-trip web requests to Google APIs. Recent days are loaded dynamically.
+          </p>
+
+          {archive && archive.coverage.days > 0 && (
+            <div className="stack" style={{ gap: 8, marginTop: 18, background: "var(--bg-inset)", padding: "14px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 13.5 }}>
+                <span style={{ color: "var(--ink-soft)" }}>Cached Period</span>
+                <span style={{ fontWeight: 600 }}>{archive.coverage.days} days ({archive.coverage.oldest} to {archive.coverage.newest})</span>
+              </div>
+            </div>
+          )}
+
+          {/* Sync/Backfill Progress Block */}
+          <div style={{ marginTop: 20, background: "var(--bg-inset)", padding: "16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700 }}>1-Year History Synchronization</span>
+              {backfillPct !== null && (
+                <span className="display-num" style={{ fontSize: 13.5, fontWeight: 700, color: "var(--sleep)" }}>{backfillPct}%</span>
+              )}
+            </div>
+
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.5 }}>
+              {backfilling 
+                ? "Retrieving batch telemetry records from Google servers. Please keep this tab open."
+                : "Pre-fetch up to one year of health history to populate the Trends and Records dashboards immediately."
+              }
+            </p>
+
+            {/* Progress Track component */}
+            {(backfilling || (backfillPct !== null && backfillPct > 0)) && (
+              <div className="progress-track">
+                <div className="progress-bar" style={{ width: `${backfillPct ?? 0}%` }} />
+              </div>
+            )}
+
+            {backfillErr && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, color: "var(--heart)", fontSize: 12.5 }}>
+                <span>⚠️</span>
+                <span>{backfillErr}</span>
+              </div>
+            )}
+
+            <div style={{ marginTop: 16 }}>
+              <button className="btn" onClick={runBackfill} disabled={backfilling} style={{ width: "100%" }}>
+                {backfilling
+                  ? "Syncing History batches…"
+                  : archive?.backfill && archive.backfill.pct !== 100 && archive.backfill.pct !== null
+                    ? `Resume Sync (${backfillPct ?? archive.backfill.pct}% completed)`
+                    : "Synchronize 1-Year History"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Storage Meta */}
+        <section className="card rise rise-3">
+          <div className="card-label">
+            <IconChip icon={LungsIcon} color="var(--breath)" />
+            App Engine Storage
+          </div>
+          <div className="stack" style={{ gap: 6, marginTop: 12, fontSize: 13.5 }}>
+            <Row k="Local Storage Path" v="local data/ folder + archive.db" />
+            <Row k="Privacy Policy" v="Your data never leaves this machine except for chosen AI provider calls." />
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <main className="page" style={{ maxWidth: 720 }}>
-      <header className="rise rise-1" style={{ marginBottom: 16 }}>
+    <main className="page" style={{ maxWidth: 840 }}>
+      <header className="rise rise-1" style={{ marginBottom: 24 }}>
         <h1 className="page-title">Settings.</h1>
         <p className="page-sub">Connection, permissions, and app preferences.</p>
       </header>
@@ -299,371 +884,42 @@ export default function Settings() {
       {!data ? (
         <p className="pulsing" style={{ color: "var(--ink-soft)" }}>Loading…</p>
       ) : (
-        <div className="stack">
+        <div className="settings-grid">
+          {/* Tab Navigation */}
+          <nav className="settings-nav rise rise-2">
+            <button
+              className={`settings-tab-btn ${activeTab === "integrations" ? "active" : ""}`}
+              onClick={() => setActiveTab("integrations")}
+            >
+              <span>📡</span> Integrations
+            </button>
+            <button
+              className={`settings-tab-btn ${activeTab === "ai" ? "active" : ""}`}
+              onClick={() => setActiveTab("ai")}
+            >
+              <span>🧠</span> AI Assistant
+            </button>
+            <button
+              className={`settings-tab-btn ${activeTab === "preferences" ? "active" : ""}`}
+              onClick={() => setActiveTab("preferences")}
+            >
+              <span>⚙️</span> Preferences
+            </button>
+            <button
+              className={`settings-tab-btn ${activeTab === "archive" ? "active" : ""}`}
+              onClick={() => setActiveTab("archive")}
+            >
+              <span>📦</span> Data & Storage
+            </button>
+          </nav>
 
-          {/* Google Health */}
-          <section className="card rise rise-2">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <div className="card-label">
-                <IconChip icon={HeartIcon} color="var(--heart)" />
-                Google Health
-              </div>
-              <span className="badge" style={{
-                background: data.connected ? "var(--activity-soft)" : "var(--food-soft)",
-                color:      data.connected ? "var(--activity)"      : "var(--food)",
-              }}>
-                {data.connected ? "connected" : data.configured ? "not connected" : "no credentials"}
-              </span>
-            </div>
-
-            {data.connected && (
-              <div className="stack" style={{ gap: 6, marginTop: 14 }}>
-                {data.permissions.map((p) => (
-                  <div key={p.label} className="row" style={{ justifyContent: "space-between", fontSize: 13.5 }}>
-                    <span style={{ color: "var(--ink-soft)" }}>{p.label}</span>
-                    <span style={{ color: p.granted ? "var(--activity)" : "var(--food)", fontWeight: 700 }}>
-                      {p.granted ? "✓" : "missing"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {data.needsReconnect && (
-              <p style={{ fontSize: 12.5, color: "var(--food)", marginTop: 12 }}>
-                Some permissions were added after you first connected — reconnect once to grant them.
-              </p>
-            )}
-
-            <div className="row" style={{ gap: 10, marginTop: 14 }}>
-              <a className="btn" href="/api/googlehealth/auth" style={{
-                background: data.needsReconnect ? "var(--food)" : "var(--ink)",
-                textDecoration: "none", flex: 1, textAlign: "center",
-              }}>
-                {data.connected ? "Reconnect (refresh permissions)" : "Connect Google Health"}
-              </a>
-              {data.connected && (
-                <button className="btn btn-ghost" onClick={disconnect} disabled={busy}>Disconnect</button>
-              )}
-            </div>
-          </section>
-
-          {/* Account & units */}
-          {data.connected && (data.profile || s || data.devices.length > 0) && (
-            <section className="card rise rise-3">
-              <div className="card-label">
-                <IconChip icon={ScaleIcon} color="var(--food)" />
-                Account & units
-              </div>
-              <div className="stack" style={{ gap: 6, marginTop: 12, fontSize: 13.5 }}>
-                {data.profile?.age != null && <Row k="Age" v={`${data.profile.age}`} />}
-                {data.profile?.membershipStartDate && <Row k="Member since" v={`${data.profile.membershipStartDate.year}`} />}
-                {s?.timeZone && <Row k="Account timezone" v={s.timeZone} />}
-                {unit(s?.weightUnit)   && <Row k="Weight unit"   v={unit(s.weightUnit)!} />}
-                {unit(s?.distanceUnit) && <Row k="Distance unit" v={unit(s.distanceUnit)!} />}
-                {unit(s?.waterUnit)    && <Row k="Water unit"    v={unit(s.waterUnit)!} />}
-                {unit(s?.temperatureUnit) && <Row k="Temperature" v={unit(s.temperatureUnit)!} />}
-                {s?.languageLocale && <Row k="Locale" v={s.languageLocale} />}
-                {data.devices.map((d: any, i: number) => (
-                  <Row key={i} k={`Device ${i + 1}`}
-                    v={[d.displayName ?? d.name?.split("/").pop(), d.batteryLevel != null ? `${d.batteryLevel}% battery` : null]
-                      .filter(Boolean).join(" · ") || "paired device"} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Local archive */}
-          {data.connected && (
-            <section className="card rise rise-4">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <div className="card-label">
-                  <IconChip icon={ScaleIcon} color="var(--sleep)" />
-                  Local archive
-                </div>
-                {archive && archive.coverage.days > 0 && (
-                  <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
-                    {archive.coverage.days} days
-                  </span>
-                )}
-              </div>
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 10 }}>
-                Past days are stored locally once they're final (3 days old), so history and trends
-                load without the API. Today and recent days always come live from Google Health.
-              </p>
-              {archive && archive.coverage.days > 0 && (
-                <div className="stack" style={{ gap: 6, marginTop: 10, fontSize: 13.5 }}>
-                  <Row k="Archived" v={`${archive.coverage.days} days`} />
-                  {archive.coverage.oldest && (
-                    <Row k="Range" v={`${archive.coverage.oldest} → ${archive.coverage.newest}`} />
-                  )}
-                </div>
-              )}
-              <div className="row" style={{ gap: 10, marginTop: 14 }}>
-                <button className="btn" onClick={runBackfill} disabled={backfilling} style={{ flex: 1 }}>
-                  {backfilling
-                    ? `Backfilling… ${backfillPct != null ? backfillPct + "%" : ""}`
-                    : archive?.backfill && archive.backfill.pct !== 100
-                      ? "Resume backfill (1 year)"
-                      : "Backfill history (1 year)"}
-                </button>
-              </div>
-              {backfillErr && (
-                <p style={{ fontSize: 12.5, color: "var(--food)", marginTop: 10 }}>{backfillErr}</p>
-              )}
-            </section>
-          )}
-
-          {/* ── AI Provider ──────────────────────────────────────────────── */}
-          <section className="card rise rise-5">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <div className="card-label">
-                <IconChip icon={LungsIcon} color="var(--breath)" />
-                AI Provider
-              </div>
-              {data.aiConfigured && (
-                <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
-                  {data.aiProviderName}
-                </span>
-              )}
-            </div>
-            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 8 }}>
-              Connect any one provider. Vision-capable models handle both the AI coach and food photo analysis.
-            </p>
-
-            {!ai ? (
-              <p className="pulsing" style={{ color: "var(--ink-soft)", marginTop: 12, fontSize: 13 }}>Loading…</p>
-            ) : (
-              <div className="stack" style={{ gap: 8, marginTop: 14 }}>
-                {(Object.keys(ai.providers) as ProviderType[]).map((p) => {
-                  const info      = ai.providers[p];
-                  const isActive  = ai.active === p;
-                  const isExpanded = aiExpanded === p;
-                  const isOAuth   = p === "openai-oauth";
-                  const isOllama  = p === "ollama";
-                  const isKeyProv = KEY_PROVIDERS.includes(p);
-
-                  return (
-                    <div key={p} style={{
-                      border: `1.5px solid ${isActive ? "var(--activity)" : "var(--border)"}`,
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      background: isActive ? "var(--activity-soft)" : "transparent",
-                    }}>
-                      {/* Header row */}
-                      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
-                        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontWeight: 600, fontSize: 13.5 }}>{info.label}</span>
-                          {isActive && (
-                            <span className="badge" style={{ background: "var(--activity)", color: "#fff", fontSize: 11 }}>active</span>
-                          )}
-                          {info.fromEnv && !isActive && (
-                            <span className="badge" style={{ background: "var(--ink-faint)", color: "var(--ink-soft)", fontSize: 11 }}>from .env</span>
-                          )}
-                          {info.configured && !isActive && (
-                            <span className="badge" style={{ background: "var(--sleep-soft)", color: "var(--sleep)", fontSize: 11 }}>connected</span>
-                          )}
-                        </div>
-
-                        <div className="row" style={{ gap: 6 }}>
-                          {info.configured && !isActive && (
-                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: "3px 10px" }}
-                              onClick={() => activateProvider(p)}>
-                              Use
-                            </button>
-                          )}
-                          {isOAuth && !deviceFlow && (
-                            <button className="btn" style={{ fontSize: 12, padding: "3px 10px" }}
-                              onClick={startDeviceCode} disabled={deviceStarting}>
-                              {deviceStarting ? "…" : info.configured ? "Reconnect" : "Connect"}
-                            </button>
-                          )}
-                          {isOAuth && deviceFlow && (
-                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: "3px 10px" }}
-                              onClick={cancelDeviceFlow}>
-                              Cancel
-                            </button>
-                          )}
-                          {!isOAuth && (
-                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: "3px 10px" }}
-                              onClick={() => openAiForm(p)}>
-                              {info.configured ? "Edit" : "Configure"}
-                            </button>
-                          )}
-                          {info.configured && !info.fromEnv && (
-                            <button className="btn btn-ghost"
-                              style={{ fontSize: 12, padding: "3px 10px", color: "var(--food)" }}
-                              onClick={() => disconnectAiProvider(p)}>
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Model line */}
-                      {info.configured && (
-                        <p style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
-                          {info.model === info.visionModel
-                            ? `${info.model} · text + vision`
-                            : `Text: ${info.model} · Vision: ${info.visionModel}`}
-                        </p>
-                      )}
-
-                      {/* ChatGPT subscription: model picker */}
-                      {isOAuth && info.configured && (
-                        <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 8 }}>
-                          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Model</label>
-                          <select className="input" value={info.model}
-                            onChange={(e) => selectOAuthModel(p, e.target.value)}
-                            style={{ flex: 1, boxSizing: "border-box" }}>
-                            {OPENAI_OAUTH_MODELS.map((m) => (
-                              <option key={m.id} value={m.id}>{m.label}</option>
-                            ))}
-                            {!OPENAI_OAUTH_MODELS.some((m) => m.id === info.model) && (
-                              <option value={info.model}>{info.model} (current)</option>
-                            )}
-                          </select>
-                        </div>
-                      )}
-
-                      {/* Hint when not configured */}
-                      {!info.configured && !isOAuth && (
-                        <p style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 4 }}>{providerHint(p)}</p>
-                      )}
-                      {!info.configured && isOAuth && (
-                        <p style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 4 }}>{providerHint(p)}</p>
-                      )}
-
-                      {/* ── ChatGPT device code panel ── */}
-                      {isOAuth && deviceFlow && (
-                        <div style={{
-                          marginTop: 12,
-                          background: "var(--surface)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          padding: "12px 14px",
-                        }}>
-                          <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                            Authorize in your browser
-                          </p>
-                          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 10 }}>
-                            1. Open{" "}
-                            <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer"
-                              style={{ color: "var(--activity)" }}>
-                              {deviceFlow.verificationUri}
-                            </a>{" "}
-                            in a browser and sign in to ChatGPT.
-                          </p>
-                          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 10 }}>
-                            2. Enter this code when prompted:
-                          </p>
-                          <div style={{
-                            fontFamily: "monospace",
-                            fontSize: 22,
-                            fontWeight: 700,
-                            letterSpacing: "0.15em",
-                            textAlign: "center",
-                            padding: "10px 0",
-                            background: "var(--bg)",
-                            borderRadius: 6,
-                            marginBottom: 12,
-                          }}>
-                            {deviceFlow.userCode}
-                          </div>
-                          <p className="pulsing" style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center" }}>
-                            Waiting for authorization…
-                          </p>
-                        </div>
-                      )}
-
-                      {/* ── API key / Ollama config form ── */}
-                      {isExpanded && !isOAuth && (
-                        <div className="stack" style={{ gap: 8, marginTop: 12 }}>
-                          {isKeyProv && !isOllama && (
-                            <div>
-                              <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4 }}>
-                                {providerKeyLabel(p)}
-                              </label>
-                              <input type="password" className="input"
-                                placeholder={providerKeyPlaceholder(p)}
-                                value={aiKey} onChange={(e) => setAiKey(e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box" }} />
-                            </div>
-                          )}
-                          {isOllama && (
-                            <div>
-                              <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4 }}>
-                                Ollama URL
-                              </label>
-                              <input type="url" className="input" placeholder="http://localhost:11434"
-                                value={aiUrl} onChange={(e) => setAiUrl(e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box" }} />
-                            </div>
-                          )}
-                          <div className="row" style={{ gap: 8 }}>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4 }}>
-                                {isOllama ? "Text model" : "Model (optional)"}
-                              </label>
-                              <input type="text" className="input"
-                                placeholder={isOllama ? "llama3.2" : `default: ${info.model}`}
-                                value={aiModel} onChange={(e) => setAiModel(e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box" }} />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ fontSize: 12, color: "var(--ink-soft)", display: "block", marginBottom: 4 }}>
-                                {isOllama ? "Vision model" : "Vision model (optional)"}
-                              </label>
-                              <input type="text" className="input"
-                                placeholder={isOllama ? "llava" : `default: ${info.visionModel}`}
-                                value={aiVModel} onChange={(e) => setAiVModel(e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box" }} />
-                            </div>
-                          </div>
-                          <p style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>{providerHint(p)}</p>
-                          {aiErr && <p style={{ fontSize: 12.5, color: "var(--food)" }}>{aiErr}</p>}
-                          <div className="row" style={{ gap: 8 }}>
-                            <button className="btn" disabled={aiSaving || (!aiKey && !isOllama)}
-                              onClick={() => saveAiProvider(p)} style={{ flex: 1 }}>
-                              {aiSaving ? "Saving…" : "Save & activate"}
-                            </button>
-                            <button className="btn btn-ghost" onClick={() => setAiExpanded(null)}>Cancel</button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Device code error */}
-                      {isOAuth && deviceErr && !deviceFlow && (
-                        <p style={{ fontSize: 12.5, color: "var(--food)", marginTop: 8 }}>{deviceErr}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* App */}
-          <section className="card rise rise-6">
-            <div className="card-label">
-              <IconChip icon={LungsIcon} color="var(--breath)" />
-              App
-            </div>
-            <div className="stack" style={{ gap: 6, marginTop: 12, fontSize: 13.5 }}>
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <span style={{ color: "var(--ink-soft)" }}>Theme</span>
-                <ThemeToggle />
-              </div>
-              <Row k="Health data timezone" v={data.timezone} />
-              {data.aiConfigured && <Row k="Coach model"  v={data.aiModel} />}
-              {data.aiConfigured && <Row k="Vision model" v={data.visionModel} />}
-              <Row k="Storage" v="local data/ folder + archive.db" />
-            </div>
-            <p style={{ fontSize: 12, color: "var(--ink-faint)", marginTop: 12 }}>
-              Nothing leaves this machine except calls to Google Health and your chosen AI provider.
-            </p>
-          </section>
-
+          {/* Tab Content Panel */}
+          <div className="settings-content stack">
+            {activeTab === "integrations" && renderIntegrations()}
+            {activeTab === "ai" && renderAi()}
+            {activeTab === "preferences" && renderPreferences()}
+            {activeTab === "archive" && renderArchive()}
+          </div>
         </div>
       )}
     </main>
@@ -672,9 +928,83 @@ export default function Settings() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+    <div className="row" style={{ justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--hairline)" }}>
       <span style={{ color: "var(--ink-soft)" }}>{k}</span>
       <span style={{ fontWeight: 600, textAlign: "right" }}>{v}</span>
+    </div>
+  );
+}
+
+/** A paired-device row whose label is locally editable — Google often returns
+ *  only a numeric id, so the override (PATCH /api/devices) gives it a name. */
+function DeviceRow({ index, device, onSaved }: { index: number; device: any; onSaved: () => void }) {
+  const id = String(device.name?.split("/").pop() ?? "");
+  const fallback = device.deviceVersion ?? id;
+  const current = device.displayName ?? fallback;
+  const battery = device.batteryLevel != null ? `${device.batteryLevel}% battery` : null;
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(current);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await fetch("/api/devices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: id, label: val }),
+      });
+      setEditing(false);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="row" style={{ justifyContent: "space-between", gap: 10, background: "var(--bg-inset)", padding: "10px 14px", borderRadius: 12, border: "1px solid var(--hairline)", width: "100%" }}>
+        <span style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>{`Device ${index + 1}`}</span>
+        <span className="row" style={{ gap: 8 }}>
+          <input
+            autoFocus
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+            placeholder={fallback}
+            className="field"
+            style={{
+              width: 140, fontSize: 13, padding: "5px 10px", textAlign: "right",
+            }}
+          />
+          <button className="btn" style={{ fontSize: 12, padding: "6px 12px" }} onClick={save} disabled={saving}>
+            {saving ? "…" : "Save"}
+          </button>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="row" style={{ justifyContent: "space-between", gap: 12, background: "var(--bg-inset)", padding: "12px 14px", borderRadius: 12, border: "1px solid var(--hairline)", width: "100%" }}>
+      <span style={{ color: "var(--ink-soft)", fontSize: 13.5 }}>{`Device ${index + 1}`}</span>
+      <span className="row" style={{ gap: 8, fontWeight: 600, textAlign: "right", fontSize: 13.5 }}>
+        <span>{[current, battery].filter(Boolean).join(" · ") || "paired device"}</span>
+        <button
+          aria-label="rename device"
+          onClick={() => { setVal(device.displayName ?? ""); setEditing(true); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-soft)", padding: 4, display: "flex", borderRadius: 6, transition: "background 0.2s" }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "var(--hairline)"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 20h4l10-10-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" />
+          </svg>
+        </button>
+      </span>
     </div>
   );
 }

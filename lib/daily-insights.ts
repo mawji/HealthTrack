@@ -10,7 +10,7 @@
 
 import { APP_TZ } from "./store";
 import { computeReadiness } from "./readiness";
-import { DaySummary, InsightSection, ReadinessScore } from "./types";
+import { DaySummary, InsightSection, ReadinessScore, HabitKind } from "./types";
 
 export interface GateResult {
   section: InsightSection;
@@ -145,6 +145,53 @@ export function gateDaily(
   }
 
   return { readiness, gates };
+}
+
+/** Compact per-habit snapshot the habits gate reasons over. */
+export interface HabitGateInput {
+  name: string;
+  kind: HabitKind;
+  completed: boolean;
+  value: number | boolean | null;
+  streak: number;
+  targetLabel: string;
+}
+
+/**
+ * Habits gate: surface a note when an avoid-limit is exceeded, a boost streak
+ * is at risk of breaking, or the day is well along with habits still open.
+ * Calm/early days produce nothing.
+ */
+export function gateHabits(habits: HabitGateInput[], now = new Date()): GateResult | null {
+  if (!habits.length) return null;
+  const frac = dayProgress(now);
+  const doneCount = habits.filter((h) => h.completed).length;
+  const exceeded = habits.filter((h) => h.kind === "avoid" && !h.completed && h.value !== null);
+  const incompleteBoost = habits.filter((h) => h.kind === "boost" && !h.completed);
+  const atRisk = incompleteBoost.filter((h) => h.streak >= 2).sort((a, b) => b.streak - a.streak);
+
+  const fire =
+    exceeded.length > 0 ||
+    (frac > 0.4 && atRisk.length > 0) ||
+    (frac > 0.6 && incompleteBoost.length > 0);
+  if (!fire) return null;
+
+  let metric: string;
+  if (exceeded.length) metric = `${exceeded[0].name} past its ${exceeded[0].targetLabel} limit today`;
+  else if (atRisk.length) metric = `${atRisk[0].name} ${atRisk[0].streak}-day streak not logged yet`;
+  else metric = `${doneCount} of ${habits.length} daily habits done`;
+
+  const context =
+    `Daily habits (${doneCount}/${habits.length} complete, ~${Math.round(frac * 100)}% of day elapsed): ` +
+    habits
+      .map((h) => {
+        const v = h.value === null ? "not logged" : typeof h.value === "boolean" ? (h.value ? "yes" : "no") : String(h.value);
+        const state = h.completed ? "ok" : h.kind === "avoid" ? "over limit" : "incomplete";
+        return `${h.name} [${h.kind}, target ${h.targetLabel}, ${v}, ${state}, streak ${h.streak}]`;
+      })
+      .join("; ") +
+    ".";
+  return { section: "habits", metric, context };
 }
 
 /** Tight, research-bounded prompt for ONLY the sections that passed the gate. */

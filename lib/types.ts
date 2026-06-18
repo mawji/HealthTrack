@@ -210,6 +210,7 @@ export interface HabitDefinition {
   showOnDaily: boolean;
   coachVisible: boolean;
   nudgeEnabled: boolean; // reserved for the future proactive-guidance system
+  sortOrder?: number; // manual display order (drag-to-reorder on Daily)
   createdAt: string;
   updatedAt: string;
 }
@@ -244,6 +245,87 @@ export interface HabitsPayload {
   status: HabitComputedStatus[];
 }
 
+// ── Goals (macro health targets) ───────────────────────────────────────────
+// A small, curated set of macro health targets the user steers toward. Lab-backed
+// goals reuse the canonical lab keys from lib/labs.ts so they line up with the
+// trended Records value; device goals read DaySummary fields. Status/progress are
+// computed deterministically in lib/goals.ts — the AI only explains them.
+// See plans/goals-menu.md. (Google Health weight write-back + height/BMI are a
+// later phase per the plan's build order.)
+
+export type GoalSource = "lab" | "device";
+export type GoalDirection = "lower_is_better" | "higher_is_better" | "target_range";
+
+export interface GoalDefinition {
+  id: string;
+  // For source "lab": a canonical key from lib/labs.ts (e.g. "ldl-cholesterol").
+  // For "device": a fixed DaySummary field key (see DEVICE_METRICS in lib/goals.ts).
+  metricKey: string;
+  source: GoalSource;
+  label: string;
+  iconKey: string; // stable key into the controlled icon registry (components/icons.tsx)
+  direction: GoalDirection;
+  unit: string;
+  // Targets, semantics by direction:
+  //  lower_is_better  -> met when value <= targetMax
+  //  higher_is_better -> met when value >= targetMin
+  //  target_range     -> met when targetMin <= value <= targetMax
+  targetMin?: number;
+  targetMax?: number;
+  tolerancePct?: number; // soft band for on-track vs needs-attention; default 0.1
+  active: boolean;
+  showOnDaily: boolean;
+  showOnTrends: boolean;
+  coachVisible: boolean;
+  isDefault: boolean; // seeded from the macro set (so defaults can be upgraded)
+  note?: string; // user's own note, e.g. "doctor wants this under 2.0"
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GoalStatus = "met" | "on_track" | "needs_attention" | "no_data";
+
+export interface GoalProgress {
+  goalId: string;
+  metricKey: string;
+  status: GoalStatus;
+  latestValue: number | null;
+  latestDate: string | null; // yyyy-MM-dd of the value used
+  target: { min?: number; max?: number };
+  direction: GoalDirection;
+  unit: string;
+  progress: number | null; // 0..1 for the bar, clamped; meaning depends on direction
+  delta: number | null; // signed gap to target in metric units
+}
+
+export interface GoalsPayload {
+  goals: GoalDefinition[];
+  progress: GoalProgress[]; // one per active goal, deterministically computed
+  demo: boolean; // device values are demo (Google Health not connected)
+}
+
+// ── Manual measurements (the "+ Log" quick-entry) ──────────────────────────
+// Values the user logs by hand from the global "+ Log" sheet. Activity/food/
+// hydration route to their existing flows; these kinds are simple values stored
+// locally in data/measurements.json. Google Health write-back (where the v4 API
+// exposes a writeonly path) is wired separately and guarded by granted scopes.
+
+export type MeasurementKind = "weight" | "glucose" | "body-temp" | "body-fat" | "sleep";
+
+export interface Measurement {
+  id: string;
+  kind: MeasurementKind;
+  at: string; // ISO timestamp of the reading
+  value: number; // primary value: kg | glucose | °C/°F | % | sleep minutes
+  unit: string; // display unit, e.g. "kg", "mmol/L", "°C", "%", "min"
+  context?: string; // glucose timing: fasting | random | post_meal | pre_meal
+  startTime?: string; // sleep: HH:MM
+  endTime?: string; // sleep: HH:MM
+  note?: string;
+  syncedToHealth: boolean; // written back to Google Health
+  googleName?: string; // dataPoint resource name when synced — provenance key
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -265,7 +347,7 @@ export interface CoachInsight {
 // Section-level snippets shown inline on the Daily screen for the current day
 // only. See plans/daily-trends-ai-suggestions.md.
 
-export type InsightSection = "movement" | "readiness" | "hydration" | "sleep" | "nutrition";
+export type InsightSection = "movement" | "readiness" | "hydration" | "sleep" | "nutrition" | "habits";
 
 export type ReadinessBand = "low" | "fair" | "good" | "high";
 

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecentDays } from "@/lib/context";
 import { isConnected, fetchWaterTotal, fetchWorkouts } from "@/lib/googlehealth";
-import { gateDaily, buildInsightPrompt } from "@/lib/daily-insights";
+import { gateDaily, gateHabits, buildInsightPrompt, HabitGateInput } from "@/lib/daily-insights";
+import {
+  getHabitDefinitions,
+  getHabitRecords,
+  computeHabitStatus,
+  habitTargetLabel,
+} from "@/lib/habits";
 import { complete, hasAiKey, parseJsonReply } from "@/lib/openrouter";
 import { readJson, writeJson, localDateStr, APP_TZ } from "@/lib/store";
 import {
@@ -11,7 +17,7 @@ import {
   WorkoutSession,
 } from "@/lib/types";
 
-const SECTIONS: InsightSection[] = ["movement", "readiness", "hydration", "sleep", "nutrition"];
+const SECTIONS: InsightSection[] = ["movement", "readiness", "hydration", "sleep", "nutrition", "habits"];
 
 // Trailing window large enough to give readiness a stable rolling baseline.
 const WINDOW = 45;
@@ -81,6 +87,31 @@ export async function GET(req: NextRequest) {
 
   const { readiness, gates } = gateDaily(day, history, waterMl, todaysWorkouts);
 
+  // Habits (current day only): gate on exceeded avoid-limits / at-risk streaks.
+  let habitSignal = "";
+  if (isCurrentDay) {
+    try {
+      const defs = getHabitDefinitions().filter((h) => h.active && h.showOnDaily);
+      const records = getHabitRecords();
+      const inputs: HabitGateInput[] = defs.map((h) => {
+        const s = computeHabitStatus(h, records, date, today);
+        return {
+          name: h.name,
+          kind: h.kind,
+          completed: s.completed,
+          value: s.value,
+          streak: s.streak,
+          targetLabel: habitTargetLabel(h),
+        };
+      });
+      habitSignal = inputs.map((i) => `${i.name}:${i.completed ? 1 : 0}:${i.value}`).join("|");
+      const hg = gateHabits(inputs);
+      if (hg) gates.push(hg);
+    } catch {
+      // habits are optional context
+    }
+  }
+
   // Previous days: show the historical readiness dial, never generate snippets.
   if (!isCurrentDay) {
     const resp: DailyInsightsResponse = {
@@ -120,6 +151,7 @@ export async function GET(req: NextRequest) {
     day.sleep?.efficiency ?? null,
     waterMl,
     todaysWorkouts,
+    habitSignal,
     gates.map((g) => g.section).join(","),
   ]);
   const cacheFile = `daily-insights-${date}-${hash}.json`;

@@ -95,13 +95,38 @@ main.page {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  padding: 24px 18px 120px;
+  /* generous bottom padding clears both the floating bottom-nav and the "+" FAB */
+  padding: 24px 18px 156px;
   min-height: 100dvh;
 }
 
 /* visible only on desktop (sidebar breakpoint) */
 .desk-only {
   display: none;
+}
+
+/* visible only on mobile (hidden at the sidebar breakpoint) */
+@media (min-width: 900px) {
+  .mobile-only {
+    display: none !important;
+  }
+}
+
+/* Global profile/theme cluster, positioned at the top-right on every screen. */
+.topbar {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (min-width: 900px) {
+  /* Topbar is mobile-only — desktop gets the sidebar + the Log FAB. */
+  .topbar {
+    display: none;
+  }
 }
 
 /* Record cards: one column on mobile, packed grid on desktop. */
@@ -180,7 +205,8 @@ main.page {
 .sidebar .wordmark span {
   color: var(--heart);
 }
-.sidebar a.side-link {
+.sidebar a.side-link,
+.sidebar button.side-link {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -192,7 +218,16 @@ main.page {
   font-weight: 600;
   transition: background 0.2s, color 0.2s;
 }
-.sidebar a.side-link:hover {
+/* button.side-link (theme toggle) resets */
+.sidebar button.side-link {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.sidebar a.side-link:hover,
+.sidebar button.side-link:hover {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 .sidebar a.side-link.active {
@@ -255,6 +290,46 @@ h1.page-title {
   box-shadow: var(--shadow);
   padding: 18px;
   transition: background-color 0.35s, border-color 0.35s;
+}
+
+/* "+ Log" quick-entry: bottom sheet on mobile, popup under the button on desktop. */
+.logsheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ink) 38%, transparent);
+}
+.logsheet-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 101;
+  width: 100%;
+  max-height: 92vh;
+  overflow-y: auto;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+@media (min-width: 900px) {
+  .logsheet-scrim {
+    background: transparent;
+  }
+  .logsheet-panel {
+    /* Fixed to viewport, opens above the desktop FAB (46px tall + 32px bottom + 12px gap). */
+    position: fixed;
+    left: auto;
+    right: 44px;
+    bottom: 92px;
+    top: auto;
+    width: 340px;
+    max-height: min(72vh, 560px);
+    border-radius: var(--radius);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+    padding: 16px;
+    padding-bottom: 16px;
+  }
 }
 
 .card-label {
@@ -393,6 +468,56 @@ nav.bottom-nav a svg {
 nav.bottom-nav a.active {
   color: var(--nav-ink);
   background: color-mix(in srgb, var(--nav-ink) 14%, transparent);
+}
+
+/* ── Floating "+ Log" action button.
+   Mobile: circle above the bottom nav.
+   Desktop: pill with "Log" label, bottom-right (sidebar gutter). ── */
+.log-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+  z-index: 55;
+  width: 54px;
+  height: 54px;
+  border: none;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s;
+}
+.log-fab:active {
+  transform: scale(0.94);
+}
+.log-fab-label {
+  display: none;
+}
+@media (min-width: 900px) {
+  .log-fab {
+    width: auto;
+    height: 46px;
+    border-radius: 999px;
+    padding: 0 18px 0 12px;
+    font-size: 22px;
+    font-weight: 600;
+    gap: 6px;
+    bottom: 32px;
+    right: 44px;
+  }
+  .log-fab-label {
+    display: inline;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
 }
 
 /* ── Buttons & inputs ── */
@@ -576,3 +701,273 @@ select.field:focus {
     grid-column: span 2;
   }
 }
+
+/* ── Settings UX Dashboard Styles ── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+@media (min-width: 768px) {
+  .settings-grid {
+    grid-template-columns: 200px 1fr;
+  }
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+  scrollbar-width: none; /* Firefox */
+}
+.settings-nav::-webkit-scrollbar {
+  display: none; /* Safari and Chrome */
+}
+
+@media (min-width: 768px) {
+  .settings-nav {
+    flex-direction: column;
+    border-bottom: none;
+    padding-bottom: 0;
+    border-right: 1px solid var(--hairline);
+    padding-right: 14px;
+    overflow-x: visible;
+  }
+}
+
+.settings-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+}
+.settings-tab-btn:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.settings-tab-btn.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+
+@media (min-width: 768px) {
+  .settings-tab-btn.active::after {
+    content: "";
+    position: absolute;
+    right: -15px;
+    top: 20%;
+    height: 60%;
+    width: 3px;
+    background: var(--activity);
+    border-radius: 99px;
+    box-shadow: 0 0 8px var(--activity);
+  }
+}
+
+/* ── Connection Map Visualizer ── */
+.connection-map {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--bg-inset);
+  border-radius: 18px;
+  border: 1px solid var(--hairline);
+  position: relative;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.connection-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.connection-node-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.connection-node:hover .connection-node-icon {
+  transform: scale(1.06);
+}
+.connection-bridge {
+  flex: 1;
+  height: 3px;
+  background: var(--hairline);
+  border-radius: 99px;
+  position: relative;
+  overflow: hidden;
+}
+.connection-bridge::before {
+  content: "";
+  position: absolute;
+  left: -50%;
+  top: 0;
+  height: 100%;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, var(--activity), transparent);
+  animation: flow-right 2.2s linear infinite;
+}
+.connection-bridge.disconnected::before {
+  background: none;
+  animation: none;
+}
+@keyframes flow-right {
+  0% { left: -50%; }
+  100% { left: 100%; }
+}
+
+/* ── Progress Track for Database Sync ── */
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-inset);
+  border-radius: 99px;
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  position: relative;
+  margin-top: 12px;
+}
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--sleep), var(--breath));
+  border-radius: 99px;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--sleep) 40%, transparent);
+  position: relative;
+}
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: progress-shine 1.8s infinite linear;
+  background-size: 200% 100%;
+}
+@keyframes progress-shine {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── Preference Units Grid ── */
+.pref-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.pref-card {
+  background: var(--bg-inset);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pref-card:hover {
+  border-color: var(--ink-faint);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.pref-card-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pref-card-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ── Digit Panel (ChatGPT OAuth) ── */
+.digit-container {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 16px 0;
+}
+.digit-box {
+  font-family: var(--font-ui), monospace;
+  font-size: 22px;
+  font-weight: 700;
+  width: 32px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-inset);
+  border: 1.5px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--ink);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+.digit-box:hover {
+  border-color: var(--activity);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--activity) 30%, transparent);
+}
+
+/* ── Auto Refresh Loader & Vitals Pulse Dot ── */
+.spin {
+  animation: spin-pulse 1.2s infinite linear;
+}
+@keyframes spin-pulse {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.pulse-dot {
+  position: relative;
+}
+.pulse-dot::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+  background: inherit;
+  opacity: 0.8;
+  animation: pulse-out 2s infinite ease-out;
+}
+@keyframes pulse-out {
+  0% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+

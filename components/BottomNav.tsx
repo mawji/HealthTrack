@@ -6,10 +6,11 @@ import { NAV_ITEMS } from "./navItems";
 
 export default function BottomNav() {
   const pathname = usePathname();
-  // Records lives in the avatar menu on mobile to keep the bar uncramped.
+  // Records, Goals and Journal live in the avatar menu on mobile to keep the bar uncramped.
+  const HIDDEN = new Set(["/records", "/goals", "/journal"]);
   return (
     <nav className="bottom-nav">
-      {NAV_ITEMS.filter((t) => t.href !== "/records").map((t) => (
+      {NAV_ITEMS.filter((t) => !HIDDEN.has(t.href)).map((t) => (
         <Link key={t.href} href={t.href} className={pathname === t.href ? "active" : ""}>
           {t.icon}
           {t.label}

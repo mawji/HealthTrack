@@ -25,6 +25,8 @@ export function Sparkline({
   labels,
   tipLabels,
   tipFormat = (v) => v.toLocaleString(),
+  target,
+  targetBand,
 }: {
   values: (number | null)[];
   color: string;
@@ -36,6 +38,8 @@ export function Sparkline({
   labels?: string[];
   tipLabels?: string[]; // hover prefix per point (falls back to labels)
   tipFormat?: (v: number) => string;
+  target?: number; // optional dashed goal-target line
+  targetBand?: [number, number]; // optional shaded goal target range [lo, hi]
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -51,8 +55,12 @@ export function Sparkline({
       </svg>
     );
   }
-  const min = Math.min(...pts.map((p) => p.v));
-  const max = Math.max(...pts.map((p) => p.v));
+  // Keep any goal target inside the y-domain so its line/band is always visible.
+  const domain = pts.map((p) => p.v);
+  if (target != null) domain.push(target);
+  if (targetBand) domain.push(targetBand[0], targetBand[1]);
+  const min = Math.min(...domain);
+  const max = Math.max(...domain);
   const span = max - min || 1;
   const pad = 5;
   const labelH = labels ? 13 : 0;
@@ -103,6 +111,28 @@ export function Sparkline({
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
+        {targetBand && (
+          <rect
+            x={4}
+            y={Math.min(y(targetBand[0]), y(targetBand[1]))}
+            width={width - 8}
+            height={Math.abs(y(targetBand[0]) - y(targetBand[1]))}
+            fill="var(--activity)"
+            opacity={0.08}
+          />
+        )}
+        {target != null && (
+          <line
+            x1={4}
+            x2={width - 4}
+            y1={y(target)}
+            y2={y(target)}
+            stroke="var(--ink-soft)"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            opacity={0.6}
+          />
+        )}
         {fill && (
           <path
             d={`${d} L ${x(last.i)} ${plotH} L ${x(pts[0].i)} ${plotH} Z`}

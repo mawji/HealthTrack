@@ -3,7 +3,111 @@
 import { Fragment, useEffect, useState } from "react";
 import { Sparkline } from "@/components/Sparkline";
 import { InsightView } from "@/components/InsightView";
-import { CoachInsight, DaySummary, TrendsPayload, TrendPoint } from "@/lib/types";
+import { CoachInsight, DaySummary, GoalDefinition, GoalProgress, Measurement, MeasurementKind, MedicalRecord, TrendsPayload, TrendPoint } from "@/lib/types";
+
+// Device-goal metricKey → the Trends series it overlays.
+const GOAL_SERIES: Record<string, SeriesKey> = {
+  steps: "steps",
+  weightKg: "weightKg",
+  restingHeartRate: "restingHr",
+  sleepHours: "sleepMin",
+};
+
+// The sleep goal is in hours but the sleepMin series is in minutes, so its
+// overlay line/band must be scaled to the series unit.
+const SERIES_SCALE: Record<string, number> = { sleepHours: 60 };
+
+const STATUS_COLOR: Record<string, string> = {
+  met: "var(--activity)",
+  on_track: "var(--food)",
+  needs_attention: "var(--heart)",
+  no_data: "var(--ink-soft)",
+};
+
+type GoalOverlay = { label: string; line?: number; band?: [number, number]; statusColor: string };
+
+/** Build per-series goal overlays from active, Trends-visible device goals. */
+function buildGoalOverlays(goals: GoalDefinition[], progress: GoalProgress[]): Partial<Record<SeriesKey, GoalOverlay>> {
+  const byId = new Map(progress.map((p) => [p.goalId, p]));
+  const out: Partial<Record<SeriesKey, GoalOverlay>> = {};
+  for (const g of goals) {
+    if (!g.active || !g.showOnTrends || g.source !== "device") continue;
+    const sk = GOAL_SERIES[g.metricKey];
+    if (!sk) continue;
+    const statusColor = STATUS_COLOR[byId.get(g.id)?.status ?? "no_data"];
+    const unit = g.unit ? ` ${g.unit}` : "";
+    const k = SERIES_SCALE[g.metricKey] ?? 1; // scale target to the series' unit
+    if (g.direction === "lower_is_better" && g.targetMax != null) {
+      out[sk] = { label: `≤ ${g.targetMax.toLocaleString()}${unit}`, line: g.targetMax * k, statusColor };
+    } else if (g.direction === "higher_is_better" && g.targetMin != null) {
+      out[sk] = { label: `≥ ${g.targetMin.toLocaleString()}${unit}`, line: g.targetMin * k, statusColor };
+    } else if (g.direction === "target_range" && g.targetMin != null && g.targetMax != null) {
+      out[sk] = { label: `${g.targetMin.toLocaleString()}–${g.targetMax.toLocaleString()}${unit}`, band: [g.targetMin * k, g.targetMax * k], statusColor };
+    }
+  }
+  return out;
+}
+
+/** Goal overlay (target line/band + status chip) for any goal — used by the
+ *  dynamic lab/measurement cards that aren't a base series. */
+function overlayForGoal(g: GoalDefinition, p?: GoalProgress): GoalOverlay {
+  const statusColor = STATUS_COLOR[p?.status ?? "no_data"];
+  const unit = g.unit ? ` ${g.unit}` : "";
+  if (g.direction === "lower_is_better" && g.targetMax != null) return { label: `≤ ${g.targetMax}${unit}`, line: g.targetMax, statusColor };
+  if (g.direction === "higher_is_better" && g.targetMin != null) return { label: `≥ ${g.targetMin}${unit}`, line: g.targetMin, statusColor };
+  if (g.direction === "target_range" && g.targetMin != null && g.targetMax != null)
+    return { label: `${g.targetMin}–${g.targetMax}${unit}`, band: [g.targetMin, g.targetMax], statusColor };
+  return { label: "", statusColor };
+}
+
+/** Civil-day list start..end inclusive (yyyy-MM-dd). */
+function dateRange(start: string, end: string): string[] {
+  const out: string[] = [];
+  let d = start;
+  while (d <= end) {
+    out.push(d);
+    const nx = new Date(d + "T12:00:00Z");
+    nx.setUTCDate(nx.getUTCDate() + 1);
+    d = nx.toISOString().slice(0, 10);
+  }
+  return out;
+}
+
+/** Daily series for a manually logged measurement kind (latest reading per day). */
+function measurementSeries(ms: Measurement[], kind: MeasurementKind, dates: string[]): { points: TrendPoint[]; unit: string } {
+  const byDate = new Map<string, { at: string; value: number }>();
+  let latest: { at: string; unit: string } | null = null;
+  for (const m of ms) {
+    if (m.kind !== kind) continue;
+    const day = m.at.slice(0, 10);
+    const prev = byDate.get(day);
+    if (!prev || m.at > prev.at) byDate.set(day, { at: m.at, value: m.value });
+    if (!latest || m.at > latest.at) latest = { at: m.at, unit: m.unit };
+  }
+  return { points: dates.map((d) => ({ date: d, value: byDate.get(d)?.value ?? null })), unit: latest?.unit ?? "" };
+}
+
+/** Daily series for a canonical lab key from records (first value per report day). */
+function labSeries(records: MedicalRecord[], key: string, dates: string[]): { points: TrendPoint[]; unit: string } {
+  const byDate = new Map<string, number>();
+  let unit = "";
+  for (const r of records) {
+    const day = r.reportDate || r.uploadedAt.slice(0, 10);
+    for (const m of r.metrics ?? []) {
+      if (m.key !== key || m.value == null) continue;
+      if (!byDate.has(day)) byDate.set(day, m.value);
+      if (m.unit) unit = m.unit;
+    }
+  }
+  return { points: dates.map((d) => ({ date: d, value: byDate.get(d) ?? null })), unit };
+}
+
+// Manual measurement kinds that aren't already a base Trends series.
+const MANUAL_CARDS: { kind: MeasurementKind; label: string; color: string }[] = [
+  { kind: "glucose", label: "Glucose", color: "var(--breath)" },
+  { kind: "body-temp", label: "Body temperature", color: "var(--heart)" },
+  { kind: "body-fat", label: "Body fat", color: "var(--food)" },
+];
 
 // Array-valued series on TrendsPayload that a TrendCard can chart.
 type SeriesKey =
@@ -95,8 +199,11 @@ function avg(points: TrendPoint[]) {
 }
 
 export default function Trends() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(7);
   const [data, setData] = useState<TrendsPayload | null>(null);
+  const [goalsData, setGoalsData] = useState<{ goals: GoalDefinition[]; progress: GoalProgress[] }>({ goals: [], progress: [] });
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [records, setRecords] = useState<MedicalRecord[]>([]);
 
   // Reused coach insight system (headline/body/viz/focusAreas) per range.
   const [weekData, setWeekData] = useState<DaySummary[]>([]);
@@ -114,6 +221,23 @@ export default function Trends() {
       .then(setData)
       .catch(() => {});
   }, [days]);
+
+  // Goals (overlays on base cards + dynamic lab cards), manual measurements, and
+  // lab records — the sources that make the metric set dynamic.
+  useEffect(() => {
+    fetch("/api/goals")
+      .then((r) => r.json())
+      .then((d) => setGoalsData({ goals: d.goals ?? [], progress: d.progress ?? [] }))
+      .catch(() => {});
+    fetch("/api/measurements?limit=1000")
+      .then((r) => r.json())
+      .then((d) => setMeasurements(d.measurements ?? []))
+      .catch(() => {});
+    fetch("/api/records")
+      .then((r) => r.json())
+      .then((d) => setRecords(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   // Recent days power any viz card the insight returns.
   useEffect(() => {
@@ -146,6 +270,9 @@ export default function Trends() {
     if (!LONG_RANGE_DAYS.has(days)) loadInsight(range.period);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
+
+  // Device-goal overlays for the base cards (steps/RHR/weight/sleep).
+  const goalOverlays = buildGoalOverlays(goalsData.goals, goalsData.progress);
 
   return (
     <main className="page wide">
@@ -220,11 +347,54 @@ export default function Trends() {
                     fmt={c.fmt}
                     lowerBetter={c.lowerBetter}
                     mode={c.mode}
+                    goal={goalOverlays[c.key]}
                   />
                 ))}
               </Fragment>
             );
           })}
+
+          {/* Dynamic cards: manually logged metrics + lab-backed goals (the
+              metric set grows as the user logs values or sets lab goals). */}
+          {(() => {
+            const dates = dateRange(data.range.start, data.range.end);
+            const manualCards = MANUAL_CARDS.flatMap((c) => {
+              const s = measurementSeries(measurements, c.kind, dates);
+              return s.points.some((p) => p.value != null) ? [{ ...c, points: s.points, unit: s.unit }] : [];
+            });
+            const labCards = goalsData.goals
+              .filter((g) => g.active && g.source === "lab")
+              .flatMap((g) => {
+                const s = labSeries(records, g.metricKey, dates);
+                if (!s.points.some((p) => p.value != null)) return [];
+                const p = goalsData.progress.find((x) => x.goalId === g.id);
+                return [{ goal: g, points: s.points, unit: s.unit || g.unit, overlay: overlayForGoal(g, p) }];
+              });
+            if (!manualCards.length && !labCards.length) return null;
+            return (
+              <Fragment>
+                <h2 className="section-title desk-span rise rise-1">Logged &amp; lab metrics</h2>
+                {manualCards.map((c) => (
+                  <TrendCard key={c.kind} rise={2} label={c.label} color={c.color} points={c.points} unit={c.unit} fmt={(v) => v.toFixed(1)} mode="range" />
+                ))}
+                {labCards.map((c) => (
+                  <TrendCard
+                    key={c.goal.id}
+                    rise={2}
+                    label={c.goal.label}
+                    color="var(--food)"
+                    points={c.points}
+                    unit={c.unit}
+                    fmt={(v) => v.toFixed(2)}
+                    mode="range"
+                    lowerBetter={c.goal.direction === "lower_is_better"}
+                    goal={c.overlay}
+                  />
+                ))}
+              </Fragment>
+            );
+          })()}
+
           {data.demo && (
             <p className="desk-span" style={{ fontSize: 12, color: "var(--ink-faint)", textAlign: "center" }}>
               Showing demo data — connect Google Health on the Today tab for your real trends.
@@ -245,6 +415,7 @@ function TrendCard({
   rise,
   lowerBetter = false,
   mode = "avg",
+  goal,
 }: {
   label: string;
   color: string;
@@ -255,6 +426,8 @@ function TrendCard({
   lowerBetter?: boolean;
   /** "range" suits moment-in-time metrics like weight: latest + low/high. */
   mode?: "avg" | "range";
+  /** Optional goal overlay: a dashed target line / band + a status-tinted chip. */
+  goal?: { label: string; line?: number; band?: [number, number]; statusColor: string };
 }) {
   const vals = points.map((p) => p.value);
   const nums = vals.filter((v): v is number => v != null);
@@ -311,8 +484,27 @@ function TrendCard({
           </>
         )}
       </div>
+      {goal && (
+        <div style={{ marginTop: 6 }}>
+          <span
+            className="badge"
+            style={{ background: `color-mix(in srgb, ${goal.statusColor} 16%, transparent)`, color: goal.statusColor, fontSize: 11 }}
+          >
+            Goal {goal.label}
+          </span>
+        </div>
+      )}
       <div style={{ marginTop: 8 }}>
-        <Sparkline values={vals} color={color} fill height={64} tipLabels={tipDates} tipFormat={(v) => `${fmt(v)} ${unit}`} />
+        <Sparkline
+          values={vals}
+          color={color}
+          fill
+          height={64}
+          tipLabels={tipDates}
+          tipFormat={(v) => `${fmt(v)} ${unit}`}
+          target={goal?.line}
+          targetBand={goal?.band}
+        />
       </div>
     </section>
   );

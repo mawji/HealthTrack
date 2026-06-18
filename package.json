@@ -20,7 +20,7 @@
     "export:public": "node scripts/export-public.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "next": "^15.3.0",
     "pdf-parse": "^1.1.1",
     "react": "^19.0.0",

@@ -61,6 +61,18 @@ export const NAV_ITEMS = [
     ),
   },
   {
+    href: "/goals",
+    label: "Goals",
+    color: "var(--sleep)",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="8.5" />
+        <circle cx="12" cy="12" r="4.5" />
+        <circle cx="12" cy="12" r="0.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/coach",
     label: "Coach",
     color: "var(--breath)",
@@ -68,6 +80,18 @@ export const NAV_ITEMS = [
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 21s-7-4.6-9.2-9C1.2 8.6 3 5 6.5 5c2 0 3.4 1 4.5 2.5h2C14.1 6 15.5 5 17.5 5 21 5 22.8 8.6 21.2 12 19 16.4 12 21 12 21z" />
         <path d="M7 12h2.5l1.5-2.5 2 4 1.5-1.5H17" />
+      </svg>
+    ),
+  },
+  {
+    href: "/journal",
+    label: "Journal",
+    color: "var(--food)",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5l1-3.6L15.4 5.5l2.6 2.6L7.6 18.5z" />
+        <path d="M13.6 7.3l2.6 2.6" />
+        <path d="M4 21h16" />
       </svg>
     ),
   },

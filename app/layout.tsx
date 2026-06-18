@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
+import LogMenu from "@/components/LogSheet";
 import Sidebar from "@/components/Sidebar";
+import TopBar from "@/components/TopBar";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -16,8 +18,18 @@ const instrument = Instrument_Sans({
 });
 
 export const metadata: Metadata = {
+  applicationName: "HealthTrack",
   title: "HealthTrack",
   description: "Your body, beautifully measured.",
+  // app/manifest.ts is auto-linked; appleWebApp enables iOS standalone mode.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "HealthTrack",
+  },
+  icons: {
+    apple: "/icons/icon.svg",
+  },
 };
 
 export const viewport: Viewport = {
@@ -25,6 +37,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: "#0b0d0f",
+  viewportFit: "cover", // respect notch/safe areas in standalone mode
 };
 
 // Applies the saved theme before first paint to avoid a flash.
@@ -39,6 +52,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Sidebar />
           <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
         </div>
+        <TopBar />
+        <LogMenu />
         <BottomNav />
       </body>
     </html>

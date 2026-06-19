@@ -17,6 +17,8 @@ function Tip({ leftPct, text }: { leftPct: number; text: string }) {
 export function Sparkline({
   values,
   color,
+  values2,
+  color2,
   width = 300,
   height = 56,
   fill = false,
@@ -25,11 +27,14 @@ export function Sparkline({
   labels,
   tipLabels,
   tipFormat = (v) => v.toLocaleString(),
+  tipFormat2,
   target,
   targetBand,
 }: {
   values: (number | null)[];
   color: string;
+  values2?: (number | null)[]; // optional second series, charted on the same y-axis
+  color2?: string;
   width?: number;
   height?: number;
   fill?: boolean;
@@ -38,12 +43,16 @@ export function Sparkline({
   labels?: string[];
   tipLabels?: string[]; // hover prefix per point (falls back to labels)
   tipFormat?: (v: number) => string;
+  tipFormat2?: (v: number) => string; // hover format for the second series
   target?: number; // optional dashed goal-target line
   targetBand?: [number, number]; // optional shaded goal target range [lo, hi]
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
   const pts = values
+    .map((v, i) => ({ v, i }))
+    .filter((p): p is { v: number; i: number } => p.v !== null && !Number.isNaN(p.v));
+  const pts2 = (values2 ?? [])
     .map((v, i) => ({ v, i }))
     .filter((p): p is { v: number; i: number } => p.v !== null && !Number.isNaN(p.v));
   if (pts.length < 2) {
@@ -56,7 +65,10 @@ export function Sparkline({
     );
   }
   // Keep any goal target inside the y-domain so its line/band is always visible.
+  // A second series (e.g. diastolic) shares the same scale so the two lines stay
+  // visually proportional.
   const domain = pts.map((p) => p.v);
+  for (const p of pts2) domain.push(p.v);
   if (target != null) domain.push(target);
   if (targetBand) domain.push(targetBand[0], targetBand[1]);
   const min = Math.min(...domain);
@@ -74,15 +86,21 @@ export function Sparkline({
   const x = (i: number) => ((i - i0) / ispan) * (width - 8) + 4;
   const y = (v: number) => plotH - pad - ((v - min) / span) * (plotH - 2 * pad);
 
-  let d = `M ${x(pts[0].i)} ${y(pts[0].v)}`;
-  for (let k = 1; k < pts.length; k++) {
-    const prev = pts[k - 1];
-    const cur = pts[k];
-    const mx = (x(prev.i) + x(cur.i)) / 2;
-    d += ` C ${mx} ${y(prev.v)}, ${mx} ${y(cur.v)}, ${x(cur.i)} ${y(cur.v)}`;
-  }
+  const smoothPath = (ps: { v: number; i: number }[]) => {
+    let s = `M ${x(ps[0].i)} ${y(ps[0].v)}`;
+    for (let k = 1; k < ps.length; k++) {
+      const prev = ps[k - 1];
+      const cur = ps[k];
+      const mx = (x(prev.i) + x(cur.i)) / 2;
+      s += ` C ${mx} ${y(prev.v)}, ${mx} ${y(cur.v)}, ${x(cur.i)} ${y(cur.v)}`;
+    }
+    return s;
+  };
+  const d = smoothPath(pts);
+  const d2 = pts2.length >= 2 ? smoothPath(pts2) : null;
 
   const last = pts[pts.length - 1];
+  const last2 = pts2.length ? pts2[pts2.length - 1] : null;
 
   // nearest point with data to a hovered fraction of the chart
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -95,13 +113,15 @@ export function Sparkline({
   }
 
   const hoverVal = hover !== null ? values[hover] : null;
+  const hoverVal2 = hover !== null && values2 ? values2[hover] : null;
+  const fmt2 = tipFormat2 ?? tipFormat;
 
   return (
     <div className="chart-wrap">
       {hover !== null && hoverVal != null && (
         <Tip
           leftPct={((hover - i0) / ispan) * 100}
-          text={`${(tipLabels ?? labels)?.[hover] ? `${(tipLabels ?? labels)![hover]} · ` : ""}${tipFormat(hoverVal)}`}
+          text={`${(tipLabels ?? labels)?.[hover] ? `${(tipLabels ?? labels)![hover]} · ` : ""}${tipFormat(hoverVal)}${hoverVal2 != null ? ` / ${fmt2(hoverVal2)}` : ""}`}
         />
       )}
       <svg
@@ -148,6 +168,15 @@ export function Sparkline({
           strokeLinecap="round"
           className={ecg ? "ecg-path" : undefined}
         />
+        {d2 && (
+          <path d={d2} fill="none" stroke={color2 ?? "var(--ink-soft)"} strokeWidth={2} strokeLinecap="round" />
+        )}
+        {last2 && (
+          <circle cx={x(last2.i)} cy={y(last2.v)} r={3.2} fill={color2 ?? "var(--ink-soft)"} />
+        )}
+        {hover !== null && hoverVal2 != null && (
+          <circle cx={x(hover)} cy={y(hoverVal2)} r={4.5} fill={color2 ?? "var(--ink-soft)"} stroke="var(--bg-raised)" strokeWidth={1.5} />
+        )}
         {dots &&
           pts.map((p) => (
             <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={color} stroke="var(--bg-raised)" strokeWidth={1} />

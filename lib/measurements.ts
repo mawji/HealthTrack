@@ -8,7 +8,9 @@ import { logWeightToGoogleHealth, logBodyFatToGoogleHealth, deleteDataPoint } fr
 import { Measurement, MeasurementKind } from "./types";
 
 // Manual kinds the Google Health v4 API accepts dataPoints:create for (others
-// — glucose, body temp, sleep — are read-only there, so they stay local).
+// — glucose, body temp, sleep, muscle mass, blood pressure — are read-only or
+// unexposed there, so they stay local). When the API adds a create/read path
+// for muscle mass or blood pressure, wire it here + in syncMeasurementToHealth.
 const HEALTH_DATATYPE: Partial<Record<MeasurementKind, string>> = {
   weight: "weight",
   "body-fat": "body-fat",
@@ -16,7 +18,11 @@ const HEALTH_DATATYPE: Partial<Record<MeasurementKind, string>> = {
 
 const FILE = "measurements.json";
 
-const KINDS: MeasurementKind[] = ["weight", "glucose", "body-temp", "body-fat", "sleep"];
+const KINDS: MeasurementKind[] = ["weight", "glucose", "body-temp", "body-fat", "sleep", "muscle-mass", "blood-pressure"];
+
+// Kinds that carry a second value (value2). Blood pressure stores systolic in
+// `value` and diastolic in `value2`.
+const DUAL_KINDS: MeasurementKind[] = ["blood-pressure"];
 
 // Default display unit per kind (the editor can override glucose/temperature).
 export const MEASUREMENT_UNITS: Record<MeasurementKind, string> = {
@@ -25,6 +31,8 @@ export const MEASUREMENT_UNITS: Record<MeasurementKind, string> = {
   "body-temp": "°C",
   "body-fat": "%",
   sleep: "min",
+  "muscle-mass": "kg",
+  "blood-pressure": "mmHg",
 };
 
 export const MEASUREMENT_LABELS: Record<MeasurementKind, string> = {
@@ -33,6 +41,8 @@ export const MEASUREMENT_LABELS: Record<MeasurementKind, string> = {
   "body-temp": "Body temperature",
   "body-fat": "Body fat",
   sleep: "Sleep",
+  "muscle-mass": "Muscle mass",
+  "blood-pressure": "Blood pressure",
 };
 
 const str = (v: unknown, max = 200): string | undefined => {
@@ -71,6 +81,10 @@ export function buildMeasurement(raw: unknown): Measurement | { error: string } 
   const value = num(r.value);
   if (value == null) return { error: "value is required" };
 
+  // Dual-value kinds (blood pressure) require a second reading (diastolic).
+  const value2 = num(r.value2);
+  if (DUAL_KINDS.includes(kind) && value2 == null) return { error: "value2 is required" };
+
   const at = typeof r.at === "string" && !Number.isNaN(Date.parse(r.at)) ? new Date(r.at).toISOString() : new Date().toISOString();
 
   return {
@@ -78,6 +92,7 @@ export function buildMeasurement(raw: unknown): Measurement | { error: string } 
     kind,
     at,
     value,
+    value2: DUAL_KINDS.includes(kind) ? value2 ?? undefined : undefined,
     unit: str(r.unit, 16) ?? MEASUREMENT_UNITS[kind],
     context: str(r.context, 24),
     startTime: /^\d{2}:\d{2}$/.test(String(r.startTime ?? "")) ? String(r.startTime) : undefined,
@@ -105,9 +120,11 @@ export function updateMeasurement(id: string, raw: unknown): Measurement | null 
   if (idx === -1) return null;
   const cur = rows[idx];
   const value = num(r.value);
+  const value2 = num(r.value2);
   rows[idx] = {
     ...cur,
     value: value ?? cur.value,
+    value2: DUAL_KINDS.includes(cur.kind) ? value2 ?? cur.value2 : cur.value2,
     unit: str(r.unit, 16) ?? cur.unit,
     context: "context" in r ? str(r.context, 24) : cur.context,
     at: typeof r.at === "string" && !Number.isNaN(Date.parse(r.at)) ? new Date(r.at).toISOString() : cur.at,

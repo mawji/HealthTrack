@@ -365,7 +365,12 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
       lines.push("", "== Manually logged measurements (newest first) ==");
       for (const m of measurements) {
         const when = m.at.slice(0, 16).replace("T", " ");
-        const val = m.kind === "sleep" ? `${(m.value / 60).toFixed(1)}h` : `${m.value} ${m.unit}`;
+        const val =
+          m.kind === "sleep"
+            ? `${(m.value / 60).toFixed(1)}h`
+            : m.kind === "blood-pressure"
+              ? `${m.value}/${m.value2 ?? "?"} ${m.unit}`
+              : `${m.value} ${m.unit}`;
         const ctx = m.context ? ` (${m.context.replace("_", " ")})` : "";
         const note = m.note ? ` — ${m.note}` : "";
         lines.push(`${when}: ${MEASUREMENT_LABELS[m.kind]} ${val}${ctx}${note}`);

@@ -24,10 +24,20 @@ type MetricCfg = {
   placeholder?: string;
   placeholders?: Record<string, string>; // per-unit hint, so e.g. mg/dL vs mmol/L differ
   hoursToMinutes?: boolean; // sleep is entered in hours, stored in minutes
+  dual?: { label1: string; label2: string; ph1?: string; ph2?: string }; // blood pressure: value (systolic) + value2 (diastolic)
 };
 
 const METRICS: MetricCfg[] = [
   { kind: "weight", label: "Weight", icon: "scale", unit: "kg", units: ["kg", "lb"], step: "0.1", placeholders: { kg: "e.g. 80.6", lb: "e.g. 178" } },
+  { kind: "muscle-mass", label: "Muscle mass", icon: "dumbbell", unit: "kg", units: ["kg", "lb"], step: "0.1", placeholders: { kg: "e.g. 34.5", lb: "e.g. 76" } },
+  {
+    kind: "blood-pressure",
+    label: "Blood pressure",
+    icon: "pulse",
+    unit: "mmHg",
+    step: "1",
+    dual: { label1: "Systolic", label2: "Diastolic", ph1: "e.g. 120", ph2: "e.g. 80" },
+  },
   {
     kind: "glucose",
     label: "Glucose",
@@ -146,15 +156,19 @@ function MenuItem({ icon, label, color, onClick }: { icon: string; label: string
 
 function MetricForm({ metric, onDone }: { metric: MetricCfg; onDone: () => void }) {
   const [value, setValue] = useState("");
+  const [value2, setValue2] = useState("");
   const [unit, setUnit] = useState(metric.unit);
   const [context, setContext] = useState(metric.contexts?.[0]?.value ?? "");
   const [at, setAt] = useState(nowLocal());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const v = Number(value);
+  const v2 = Number(value2);
+  const valid = Number.isFinite(v) && value !== "" && (!metric.dual || (Number.isFinite(v2) && value2 !== ""));
+
   async function save() {
-    const v = Number(value);
-    if (!Number.isFinite(v) || value === "") return;
+    if (!valid) return;
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
@@ -164,6 +178,7 @@ function MetricForm({ metric, onDone }: { metric: MetricCfg; onDone: () => void 
         at: new Date(at).toISOString(),
         note: note.trim() || undefined,
       };
+      if (metric.dual) body.value2 = v2;
       if (metric.contexts) body.context = context;
       const res = await fetch("/api/measurements", {
         method: "POST",
@@ -178,32 +193,68 @@ function MetricForm({ metric, onDone }: { metric: MetricCfg; onDone: () => void 
 
   return (
     <div className="stack" style={{ gap: 14 }}>
-      <Field label="Value">
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="field"
-            type="number"
-            inputMode="decimal"
-            step={metric.step ?? "any"}
-            value={value}
-            autoFocus
-            placeholder={metric.placeholders?.[unit] ?? metric.placeholder}
-            onChange={(e) => setValue(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          {metric.units ? (
-            <select className="field" value={unit} onChange={(e) => setUnit(e.target.value)} style={{ width: 100 }}>
-              {metric.units.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span style={{ alignSelf: "center", color: "var(--ink-soft)", fontSize: 14 }}>{metric.unit}</span>
-          )}
+      {metric.dual ? (
+        <div className="row" style={{ gap: 10 }}>
+          <Field label={metric.dual.label1}>
+            <div className="row" style={{ gap: 8 }}>
+              <input
+                className="field"
+                type="number"
+                inputMode="decimal"
+                step={metric.step ?? "any"}
+                value={value}
+                autoFocus
+                placeholder={metric.dual.ph1}
+                onChange={(e) => setValue(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={{ alignSelf: "center", color: "var(--ink-soft)", fontSize: 14 }}>{metric.unit}</span>
+            </div>
+          </Field>
+          <Field label={metric.dual.label2}>
+            <div className="row" style={{ gap: 8 }}>
+              <input
+                className="field"
+                type="number"
+                inputMode="decimal"
+                step={metric.step ?? "any"}
+                value={value2}
+                placeholder={metric.dual.ph2}
+                onChange={(e) => setValue2(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={{ alignSelf: "center", color: "var(--ink-soft)", fontSize: 14 }}>{metric.unit}</span>
+            </div>
+          </Field>
         </div>
-      </Field>
+      ) : (
+        <Field label="Value">
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="field"
+              type="number"
+              inputMode="decimal"
+              step={metric.step ?? "any"}
+              value={value}
+              autoFocus
+              placeholder={metric.placeholders?.[unit] ?? metric.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            {metric.units ? (
+              <select className="field" value={unit} onChange={(e) => setUnit(e.target.value)} style={{ width: 100 }}>
+                {metric.units.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span style={{ alignSelf: "center", color: "var(--ink-soft)", fontSize: 14 }}>{metric.unit}</span>
+            )}
+          </div>
+        </Field>
+      )}
 
       {metric.contexts && (
         <Field label="When">
@@ -226,7 +277,7 @@ function MetricForm({ metric, onDone }: { metric: MetricCfg; onDone: () => void 
       </Field>
 
       <div className="row" style={{ justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
-        <button className="btn" disabled={saving || value === ""} onClick={save}>
+        <button className="btn" disabled={saving || !valid} onClick={save}>
           {saving ? "Saving…" : "Log"}
         </button>
       </div>

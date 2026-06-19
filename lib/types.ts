@@ -310,14 +310,15 @@ export interface GoalsPayload {
 // locally in data/measurements.json. Google Health write-back (where the v4 API
 // exposes a writeonly path) is wired separately and guarded by granted scopes.
 
-export type MeasurementKind = "weight" | "glucose" | "body-temp" | "body-fat" | "sleep";
+export type MeasurementKind = "weight" | "glucose" | "body-temp" | "body-fat" | "sleep" | "muscle-mass" | "blood-pressure";
 
 export interface Measurement {
   id: string;
   kind: MeasurementKind;
   at: string; // ISO timestamp of the reading
-  value: number; // primary value: kg | glucose | °C/°F | % | sleep minutes
-  unit: string; // display unit, e.g. "kg", "mmol/L", "°C", "%", "min"
+  value: number; // primary value: kg | glucose | °C/°F | % | sleep minutes | muscle-mass kg | blood-pressure systolic
+  value2?: number; // secondary value — diastolic for blood-pressure (mmHg)
+  unit: string; // display unit, e.g. "kg", "mmol/L", "°C", "%", "min", "mmHg"
   context?: string; // glucose timing: fasting | random | post_meal | pre_meal
   startTime?: string; // sleep: HH:MM
   endTime?: string; // sleep: HH:MM

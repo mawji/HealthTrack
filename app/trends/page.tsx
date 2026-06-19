@@ -73,15 +73,24 @@ function dateRange(start: string, end: string): string[] {
   return out;
 }
 
-/** Daily series for a manually logged measurement kind (latest reading per day). */
-function measurementSeries(ms: Measurement[], kind: MeasurementKind, dates: string[]): { points: TrendPoint[]; unit: string } {
+/** Daily series for a manually logged measurement kind (latest reading per day).
+ *  `pick` selects which stored number to chart — defaults to the primary value,
+ *  but blood pressure charts both systolic (value) and diastolic (value2). */
+function measurementSeries(
+  ms: Measurement[],
+  kind: MeasurementKind,
+  dates: string[],
+  pick: (m: Measurement) => number | null | undefined = (m) => m.value
+): { points: TrendPoint[]; unit: string } {
   const byDate = new Map<string, { at: string; value: number }>();
   let latest: { at: string; unit: string } | null = null;
   for (const m of ms) {
     if (m.kind !== kind) continue;
+    const v = pick(m);
+    if (v == null) continue;
     const day = m.at.slice(0, 10);
     const prev = byDate.get(day);
-    if (!prev || m.at > prev.at) byDate.set(day, { at: m.at, value: m.value });
+    if (!prev || m.at > prev.at) byDate.set(day, { at: m.at, value: v });
     if (!latest || m.at > latest.at) latest = { at: m.at, unit: m.unit };
   }
   return { points: dates.map((d) => ({ date: d, value: byDate.get(d)?.value ?? null })), unit: latest?.unit ?? "" };
@@ -107,6 +116,7 @@ const MANUAL_CARDS: { kind: MeasurementKind; label: string; color: string }[] = 
   { kind: "glucose", label: "Glucose", color: "var(--breath)" },
   { kind: "body-temp", label: "Body temperature", color: "var(--heart)" },
   { kind: "body-fat", label: "Body fat", color: "var(--food)" },
+  { kind: "muscle-mass", label: "Muscle mass", color: "var(--activity)" },
 ];
 
 // Array-valued series on TrendsPayload that a TrendCard can chart.
@@ -362,6 +372,13 @@ export default function Trends() {
               const s = measurementSeries(measurements, c.kind, dates);
               return s.points.some((p) => p.value != null) ? [{ ...c, points: s.points, unit: s.unit }] : [];
             });
+            // Blood pressure charts two lines on one card: systolic + diastolic.
+            const bp = (() => {
+              const sys = measurementSeries(measurements, "blood-pressure", dates);
+              if (!sys.points.some((p) => p.value != null)) return null;
+              const dia = measurementSeries(measurements, "blood-pressure", dates, (m) => m.value2);
+              return { points: sys.points, points2: dia.points, unit: sys.unit || "mmHg" };
+            })();
             const labCards = goalsData.goals
               .filter((g) => g.active && g.source === "lab")
               .flatMap((g) => {
@@ -370,10 +387,24 @@ export default function Trends() {
                 const p = goalsData.progress.find((x) => x.goalId === g.id);
                 return [{ goal: g, points: s.points, unit: s.unit || g.unit, overlay: overlayForGoal(g, p) }];
               });
-            if (!manualCards.length && !labCards.length) return null;
+            if (!manualCards.length && !labCards.length && !bp) return null;
             return (
               <Fragment>
                 <h2 className="section-title desk-span rise rise-1">Logged &amp; lab metrics</h2>
+                {bp && (
+                  <TrendCard
+                    rise={2}
+                    label="Blood pressure"
+                    color="var(--heart)"
+                    points={bp.points}
+                    points2={bp.points2}
+                    color2="var(--breath)"
+                    legend={["Systolic", "Diastolic"]}
+                    unit={bp.unit}
+                    fmt={(v) => v.toFixed(0)}
+                    mode="range"
+                  />
+                )}
                 {manualCards.map((c) => (
                   <TrendCard key={c.kind} rise={2} label={c.label} color={c.color} points={c.points} unit={c.unit} fmt={(v) => v.toFixed(1)} mode="range" />
                 ))}
@@ -410,6 +441,9 @@ function TrendCard({
   label,
   color,
   points,
+  points2,
+  color2,
+  legend,
   unit,
   fmt,
   rise,
@@ -420,6 +454,11 @@ function TrendCard({
   label: string;
   color: string;
   points: TrendPoint[];
+  /** Optional second series charted on the same axis — e.g. diastolic for blood pressure. */
+  points2?: TrendPoint[];
+  color2?: string;
+  /** Labels for the two series legend [primary, secondary], shown when points2 is set. */
+  legend?: [string, string];
   unit: string;
   fmt: (v: number) => string;
   rise: number;
@@ -431,6 +470,9 @@ function TrendCard({
 }) {
   const vals = points.map((p) => p.value);
   const nums = vals.filter((v): v is number => v != null);
+  const vals2 = points2?.map((p) => p.value);
+  const nums2 = vals2?.filter((v): v is number => v != null) ?? [];
+  const latest2 = nums2.length ? nums2[nums2.length - 1] : null;
   const a = avg(points);
   const half = Math.floor(points.length / 2);
   const first = avg(points.slice(0, half));
@@ -458,23 +500,42 @@ function TrendCard({
           <span className="dot" style={{ background: color }} />
           {label}
         </div>
-        {mode === "range"
-          ? lo != null &&
-            hi != null && (
-              <span className="badge" style={{ background: "var(--food-soft)", color: "var(--food)" }}>
-                low {fmt(lo)} · high {fmt(hi)}
+        {/* The two-series legend stands in for the low/high badge on dual cards. */}
+        {points2 ? (
+          legend && (
+            <div className="row" style={{ gap: 12 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--ink-soft)" }}>
+                <span className="dot" style={{ background: color }} />
+                {legend[0]}
               </span>
-            )
-          : delta && (
-              <span className="badge" style={{ background: improving ? "var(--activity-soft)" : "var(--heart-soft)", color: improving ? "var(--activity)" : "var(--heart)" }}>
-                {delta}
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--ink-soft)" }}>
+                <span className="dot" style={{ background: color2 }} />
+                {legend[1]}
               </span>
-            )}
+            </div>
+          )
+        ) : mode === "range" ? (
+          lo != null &&
+          hi != null && (
+            <span className="badge" style={{ background: "var(--food-soft)", color: "var(--food)" }}>
+              low {fmt(lo)} · high {fmt(hi)}
+            </span>
+          )
+        ) : (
+          delta && (
+            <span className="badge" style={{ background: improving ? "var(--activity-soft)" : "var(--heart-soft)", color: improving ? "var(--activity)" : "var(--heart)" }}>
+              {delta}
+            </span>
+          )
+        )}
       </div>
       <div className="row" style={{ gap: 8, alignItems: "baseline", marginTop: 8 }}>
         {mode === "range" ? (
           <>
-            <span className="display-num" style={{ fontSize: 34 }}>{latest != null ? fmt(latest) : "—"}</span>
+            <span className="display-num" style={{ fontSize: 34 }}>
+              {latest != null ? fmt(latest) : "—"}
+              {points2 ? `/${latest2 != null ? fmt(latest2) : "—"}` : ""}
+            </span>
             <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>latest {unit}</span>
           </>
         ) : (
@@ -498,10 +559,13 @@ function TrendCard({
         <Sparkline
           values={vals}
           color={color}
-          fill
+          values2={vals2}
+          color2={color2}
+          fill={!points2}
           height={64}
           tipLabels={tipDates}
           tipFormat={(v) => `${fmt(v)} ${unit}`}
+          tipFormat2={(v) => `${fmt(v)} ${unit}`}
           target={goal?.line}
           targetBand={goal?.band}
         />

@@ -330,9 +330,4 @@ no third-party hosting.
 
 ## License
 
-[GNU AGPL-3.0](LICENSE) © 2026 Shams Mawji.
-
-The AGPL's network-copyleft means anyone who runs a modified version as a
-hosted service must release their full source under the same license. As the
-sole copyright holder, Shams Mawji can also grant separate commercial licenses
-— reach out if you need terms other than the AGPL.
+[MIT](LICENSE) © 2026 Shams Mawji.

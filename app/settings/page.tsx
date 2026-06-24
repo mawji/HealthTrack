@@ -32,6 +32,8 @@ interface ProviderInfo {
 
 interface AiPayload {
   active: string;
+  primary: string | null;
+  secondary: string | null;
   providers: Record<string, ProviderInfo>;
 }
 
@@ -288,10 +290,14 @@ export default function Settings() {
   }
 
   async function activateProvider(p: ProviderType) {
+    await setProviderRole("primary", p);
+  }
+
+  async function setProviderRole(role: "primary" | "secondary", p: ProviderType | null) {
     await fetch("/api/ai-provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "activate", provider: p }),
+      body: JSON.stringify({ action: "setRole", role, provider: p }),
     });
     loadAi(); load();
   }
@@ -438,13 +444,49 @@ export default function Settings() {
             Connect a language model to power the Health Coach and automated food analysis. Vision-capable models are recommended to parse meal photos.
           </p>
 
+          {ai && (() => {
+            const configured = (Object.keys(ai.providers) as ProviderType[]).filter((p) => ai.providers[p].configured);
+            if (configured.length === 0) return null;
+            const labelFor = (p: string) => ai.providers[p as ProviderType]?.label ?? p;
+            return (
+              <div className="stack" style={{ gap: 10, marginTop: 18, background: "var(--bg-inset)", padding: "14px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+                <div className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700 }}>Primary model</span>
+                    <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Used first for every request</span>
+                  </div>
+                  <select className="field" style={{ minWidth: 200, padding: "6px 10px", borderRadius: 8, fontSize: 13 }}
+                    value={ai.primary ?? ""}
+                    onChange={(e) => setProviderRole("primary", e.target.value as ProviderType)}>
+                    {!ai.primary && <option value="">Select…</option>}
+                    {configured.map((p) => <option key={p} value={p}>{labelFor(p)}</option>)}
+                  </select>
+                </div>
+                <div className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700 }}>Secondary (fallback)</span>
+                    <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Used automatically if the primary fails</span>
+                  </div>
+                  <select className="field" style={{ minWidth: 200, padding: "6px 10px", borderRadius: 8, fontSize: 13 }}
+                    value={ai.secondary ?? ""}
+                    onChange={(e) => setProviderRole("secondary", (e.target.value || null) as ProviderType | null)}>
+                    <option value="">None</option>
+                    {configured.filter((p) => p !== ai.primary).map((p) => <option key={p} value={p}>{labelFor(p)}</option>)}
+                  </select>
+                </div>
+              </div>
+            );
+          })()}
+
           {!ai ? (
             <p className="pulsing" style={{ color: "var(--ink-soft)", marginTop: 16, fontSize: 13 }}>Loading providers…</p>
           ) : (
             <div className="stack" style={{ gap: 12, marginTop: 20 }}>
               {(Object.keys(ai.providers) as ProviderType[]).map((p) => {
-                const info      = ai.providers[p];
-                const isActive  = ai.active === p;
+                const info       = ai.providers[p];
+                const isPrimary  = ai.primary === p;
+                const isSecondary = ai.secondary === p;
+                const isActive   = isPrimary; // primary drives the card highlight
                 const isExpanded = aiExpanded === p;
                 const isOAuth   = p === "openai-oauth";
                 const isOllama  = p === "ollama";
@@ -462,22 +504,25 @@ export default function Settings() {
                     <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 700, fontSize: 14.5 }}>{info.label}</span>
-                        {isActive && (
-                          <span className="badge" style={{ background: "var(--activity)", color: "var(--bg)", fontSize: 10.5, padding: "2px 8px" }}>Active</span>
+                        {isPrimary && (
+                          <span className="badge" style={{ background: "var(--activity)", color: "var(--bg)", fontSize: 10.5, padding: "2px 8px" }}>Primary</span>
                         )}
-                        {info.fromEnv && !isActive && (
+                        {isSecondary && (
+                          <span className="badge" style={{ background: "var(--sleep)", color: "var(--bg)", fontSize: 10.5, padding: "2px 8px" }}>Fallback</span>
+                        )}
+                        {info.fromEnv && !isPrimary && !isSecondary && (
                           <span className="badge" style={{ background: "var(--ink-faint)", color: "var(--ink-soft)", fontSize: 10.5, padding: "2px 8px" }}>.env file</span>
                         )}
-                        {info.configured && !isActive && (
+                        {info.configured && !isPrimary && !isSecondary && (
                           <span className="badge" style={{ background: "var(--sleep-soft)", color: "var(--sleep)", fontSize: 10.5, padding: "2px 8px" }}>Ready</span>
                         )}
                       </div>
 
                       <div className="row" style={{ gap: 6 }}>
-                        {info.configured && !isActive && (
+                        {info.configured && !isPrimary && (
                           <button className="btn" style={{ fontSize: 12, padding: "5px 12px", background: "var(--ink)", color: "var(--bg)" }}
                             onClick={() => activateProvider(p)}>
-                            Activate
+                            Set Primary
                           </button>
                         )}
                         {isOAuth && !deviceFlow && (
@@ -629,7 +674,7 @@ export default function Settings() {
                         <div className="row" style={{ gap: 8, marginTop: 4 }}>
                           <button className="btn" disabled={aiSaving || (!aiKey && !isOllama)}
                             onClick={() => saveAiProvider(p)} style={{ flex: 1 }}>
-                            {aiSaving ? "Saving…" : "Save & Activate"}
+                            {aiSaving ? "Saving…" : "Save"}
                           </button>
                           <button className="btn btn-ghost" onClick={() => setAiExpanded(null)}>Cancel</button>
                         </div>

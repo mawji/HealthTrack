@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChatMessage, DaySummary } from "@/lib/types";
 import { VizCard, VizPlaceholder } from "@/components/ChatVisuals";
+import Toast from "@/components/Toast";
 
 // ── Fenced protocols: ```viz renders a card, ```log executes an action ──
 
@@ -313,6 +314,7 @@ export default function Coach() {
   const [suggestions] = useState(() => pickSuggestions(4));
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [weekData, setWeekData] = useState<DaySummary[]>([]);
@@ -347,6 +349,8 @@ export default function Coach() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? `Chat failed (${res.status})`);
       }
+      const fellBackTo = res.headers.get("X-AI-Fallback");
+      if (fellBackTo) setFallbackNote(`Primary model unavailable — using ${fellBackTo}.`);
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let acc = "";
@@ -365,6 +369,7 @@ export default function Coach() {
 
   return (
     <main className="page" style={{ display: "flex", flexDirection: "column", maxWidth: 720 }}>
+      <Toast message={fallbackNote} onDone={() => setFallbackNote(null)} tone="warn" />
       <header className="rise rise-1" style={{ marginBottom: 14 }}>
         <div className="row" style={{ gap: 14 }}>
           <div

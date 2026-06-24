@@ -134,8 +134,15 @@ type CardCfg = {
   color: string;
   unit: string;
   fmt: (v: number) => string;
+  /** Formats the *magnitude* of a first-half→second-half change for the badge.
+   *  Defaults to `fmt` + the card unit; override where that unit is wrong for a
+   *  delta (e.g. sleep, where small changes read better in minutes). */
+  deltaFmt?: (mag: number) => string;
   lowerBetter?: boolean;
   mode?: "avg" | "range";
+  /** Headline the total per week (rest days are real zeros) instead of a daily
+   *  average — suits intermittent metrics like workouts. */
+  weekly?: boolean;
   /** Core metrics render even on sparse ranges; others hide when no data. */
   always?: boolean;
 };
@@ -147,7 +154,7 @@ const SECTIONS: { title: string; cards: CardCfg[] }[] = [
     cards: [
       { key: "steps", label: "Steps", color: "var(--activity)", unit: "/day", fmt: (v) => Math.round(v).toLocaleString(), always: true },
       { key: "azm", label: "Active minutes", color: "var(--activity)", unit: "min/day", fmt: (v) => Math.round(v).toString() },
-      { key: "workoutMin", label: "Workouts", color: "var(--activity)", unit: "min/day", fmt: (v) => Math.round(v).toString() },
+      { key: "workoutMin", label: "Workouts", color: "var(--activity)", unit: "min", fmt: (v) => Math.round(v).toString(), weekly: true },
     ],
   },
   {
@@ -161,7 +168,7 @@ const SECTIONS: { title: string; cards: CardCfg[] }[] = [
   {
     title: "Sleep",
     cards: [
-      { key: "sleepMin", label: "Sleep", color: "var(--sleep)", unit: "", fmt: (v) => `${(v / 60).toFixed(1)}h`, always: true },
+      { key: "sleepMin", label: "Sleep", color: "var(--sleep)", unit: "", fmt: (v) => `${(v / 60).toFixed(1)}h`, deltaFmt: (m) => (m < 60 ? `${Math.round(m)}m` : `${(m / 60).toFixed(1)}h`), always: true },
     ],
   },
   {
@@ -201,6 +208,16 @@ const RANGES = [
 
 // quarter/year are long-range retrospectives — summary on demand only.
 const LONG_RANGE_DAYS = new Set([90, 365]);
+
+// How each range's trend badge compares "recent" vs "baseline": the most recent
+// slice against the window immediately before it, sized so the readout stays
+// meaningful (today vs the rest of the week; this week vs the prior 3 weeks; …).
+const RANGE_COMPARE: Record<number, { recentDays: number; recentLabel: string; baselineLabel: string }> = {
+  7: { recentDays: 1, recentLabel: "today", baselineLabel: "prior 6 days" },
+  30: { recentDays: 7, recentLabel: "this week", baselineLabel: "prior 3 weeks" },
+  90: { recentDays: 30, recentLabel: "this month", baselineLabel: "prior 2 months" },
+  365: { recentDays: 90, recentLabel: "last 90 days", baselineLabel: "prior 9 months" },
+};
 
 function avg(points: TrendPoint[]) {
   const vals = points.map((p) => p.value).filter((v): v is number => v != null);
@@ -355,8 +372,11 @@ export default function Trends() {
                     points={(data[c.key] as TrendPoint[]) ?? []}
                     unit={c.unit}
                     fmt={c.fmt}
+                    deltaFmt={c.deltaFmt}
+                    compare={RANGE_COMPARE[days]}
                     lowerBetter={c.lowerBetter}
                     mode={c.mode}
+                    weekly={c.weekly}
                     goal={goalOverlays[c.key]}
                   />
                 ))}
@@ -446,9 +466,12 @@ function TrendCard({
   legend,
   unit,
   fmt,
+  deltaFmt,
+  compare,
   rise,
   lowerBetter = false,
   mode = "avg",
+  weekly = false,
   goal,
 }: {
   label: string;
@@ -461,10 +484,16 @@ function TrendCard({
   legend?: [string, string];
   unit: string;
   fmt: (v: number) => string;
+  /** Formats a delta magnitude for the trend badge; defaults to `fmt` + unit. */
+  deltaFmt?: (mag: number) => string;
+  /** Recent-vs-baseline comparison for the trend badge (sizes scale with range). */
+  compare?: { recentDays: number; recentLabel: string; baselineLabel: string };
   rise: number;
   lowerBetter?: boolean;
   /** "range" suits moment-in-time metrics like weight: latest + low/high. */
   mode?: "avg" | "range";
+  /** Headline a weekly total (rest days count as zero) plus a session count. */
+  weekly?: boolean;
   /** Optional goal overlay: a dashed target line / band + a status-tinted chip. */
   goal?: { label: string; line?: number; band?: [number, number]; statusColor: string };
 }) {
@@ -474,20 +503,41 @@ function TrendCard({
   const nums2 = vals2?.filter((v): v is number => v != null) ?? [];
   const latest2 = nums2.length ? nums2[nums2.length - 1] : null;
   const a = avg(points);
-  const half = Math.floor(points.length / 2);
-  const first = avg(points.slice(0, half));
-  const second = avg(points.slice(half));
+  // Weekly total: sum the logged values (rest days are genuine zeros, not gaps)
+  // and divide by the number of weeks the range spans — a stable min/week rate.
+  const weeklyTotal = weekly && nums.length ? nums.reduce((s, v) => s + v, 0) / Math.max(1, points.length / 7) : null;
+  // Trend badge: most recent slice vs the window immediately before it, in the
+  // metric's own unit — a percentage is meaningless for heart rate (+3 bpm) or
+  // sleep (−45m). The slice sizes scale with the range (see RANGE_COMPARE), so
+  // it reads as "today vs the rest of the week", "this week vs prior 3", etc.
+  const cmp = compare ?? { recentDays: Math.ceil(points.length / 2), recentLabel: "recent", baselineLabel: "earlier" };
+  const cut = Math.max(0, points.length - cmp.recentDays);
+  const recentAvg = avg(points.slice(cut));
+  const baselineAvg = avg(points.slice(0, cut));
   let delta: string | null = null;
   let improving = false;
-  if (first != null && second != null && first !== 0) {
-    const pct = ((second - first) / first) * 100;
-    delta = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
-    improving = lowerBetter ? pct < 0 : pct > 0;
+  if (recentAvg != null && baselineAvg != null) {
+    const diff = recentAvg - baselineAvg;
+    const sign = diff > 0 ? "+" : "−";
+    const mag = Math.abs(diff);
+    const sep = unit === "%" ? "" : " ";
+    const body = deltaFmt ? deltaFmt(mag) : `${fmt(mag)}${unit && !unit.startsWith("/") ? `${sep}${unit}` : ""}`;
+    delta = `${sign}${body}`;
+    improving = lowerBetter ? diff < 0 : diff > 0;
   }
 
   const latest = nums.length ? nums[nums.length - 1] : null;
   const lo = nums.length ? Math.min(...nums) : null;
   const hi = nums.length ? Math.max(...nums) : null;
+
+  // An intermittent series has a gap *between* readings; drawing a line across
+  // it would interpolate values that never existed, so chart bars instead.
+  // (Dual-series cards stay lines — overlaid bars don't read.) Level metrics
+  // (range mode) floor at their min; accumulation metrics floor at zero.
+  const firstIdx = vals.findIndex((v) => v != null);
+  const lastIdx = vals.length - 1 - [...vals].reverse().findIndex((v) => v != null);
+  const hasGap = firstIdx >= 0 && vals.slice(firstIdx, lastIdx + 1).some((v) => v == null);
+  const useBars = hasGap && !points2;
 
   const tipDates = points.map((p) =>
     new Date(p.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
@@ -514,6 +564,12 @@ function TrendCard({
               </span>
             </div>
           )
+        ) : weekly ? (
+          nums.length > 0 && (
+            <span className="badge" style={{ background: "var(--activity-soft)", color: "var(--activity)" }}>
+              {nums.length} session{nums.length === 1 ? "" : "s"}
+            </span>
+          )
         ) : mode === "range" ? (
           lo != null &&
           hi != null && (
@@ -523,14 +579,24 @@ function TrendCard({
           )
         ) : (
           delta && (
-            <span className="badge" style={{ background: improving ? "var(--activity-soft)" : "var(--heart-soft)", color: improving ? "var(--activity)" : "var(--heart)" }}>
+            <span
+              className="badge"
+              title={`${cmp.recentLabel[0].toUpperCase()}${cmp.recentLabel.slice(1)} compared with the ${cmp.baselineLabel}`}
+              style={{ background: improving ? "var(--activity-soft)" : "var(--heart-soft)", color: improving ? "var(--activity)" : "var(--heart)" }}
+            >
               {delta}
+              <span style={{ fontWeight: 400, opacity: 0.7, marginLeft: 4 }}>vs {cmp.baselineLabel}</span>
             </span>
           )
         )}
       </div>
       <div className="row" style={{ gap: 8, alignItems: "baseline", marginTop: 8 }}>
-        {mode === "range" ? (
+        {weekly ? (
+          <>
+            <span className="display-num" style={{ fontSize: 34 }}>{weeklyTotal != null ? fmt(weeklyTotal) : "—"}</span>
+            <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>{unit}/week</span>
+          </>
+        ) : mode === "range" ? (
           <>
             <span className="display-num" style={{ fontSize: 34 }}>
               {latest != null ? fmt(latest) : "—"}
@@ -562,6 +628,8 @@ function TrendCard({
           values2={vals2}
           color2={color2}
           fill={!points2}
+          bars={useBars}
+          barZero={mode !== "range"}
           height={64}
           tipLabels={tipDates}
           tipFormat={(v) => `${fmt(v)} ${unit}`}

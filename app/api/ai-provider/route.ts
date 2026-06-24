@@ -5,16 +5,10 @@ import {
   saveProvider,
   removeProvider,
   setActive,
+  setRole,
+  getRoles,
+  PROVIDER_LABELS,
 } from "@/lib/ai-provider";
-
-const PROVIDER_LABELS: Record<ProviderType, string> = {
-  openrouter:    "OpenRouter + Cerebras",
-  "openai-key":    "ChatGPT (API Key)",
-  "openai-oauth":  "ChatGPT (Subscription)",
-  "gemini-key":    "Gemini (API Key)",
-  "anthropic-key": "Anthropic Claude",
-  ollama:        "Ollama (Local)",
-};
 
 const DEFAULT_MODELS: Record<ProviderType, { model: string; visionModel: string }> = {
   openrouter:    { model: process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b", visionModel: process.env.OPENROUTER_VISION_MODEL || "meta-llama/llama-4-scout" },
@@ -55,14 +49,11 @@ export async function GET() {
     })
   );
 
-  let active: string = "none";
-  if (store?.active && store.providers[store.active]) {
-    active = store.active;
-  } else if (envOrConfigured) {
-    active = "openrouter";
-  }
+  const { primary, secondary } = getRoles();
+  // `active` mirrors the primary for back-compat with any older callers.
+  const active: string = primary ?? (envOrConfigured ? "openrouter" : "none");
 
-  return NextResponse.json({ active, providers });
+  return NextResponse.json({ active, primary: primary ?? null, secondary: secondary ?? null, providers });
 }
 
 export async function POST(req: NextRequest) {
@@ -82,6 +73,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Provider not configured" }, { status: 400 });
     }
     setActive(provider);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "setRole") {
+    const role = (body as { role?: string }).role;
+    if (role !== "primary" && role !== "secondary") {
+      return NextResponse.json({ error: "role must be 'primary' or 'secondary'" }, { status: 400 });
+    }
+    // provider may be null/omitted to clear the secondary slot.
+    if (provider) {
+      const store = getStore();
+      const configured = Boolean(store?.providers[provider]) || (provider === "openrouter" && Boolean(process.env.OPENROUTER_API_KEY));
+      if (!configured) {
+        return NextResponse.json({ error: "Provider not configured" }, { status: 400 });
+      }
+    } else if (role === "primary") {
+      return NextResponse.json({ error: "primary requires a provider" }, { status: 400 });
+    }
+    setRole(role, provider ?? null);
     return NextResponse.json({ ok: true });
   }
 

@@ -24,6 +24,8 @@ export function Sparkline({
   fill = false,
   ecg = false,
   dots = false,
+  bars = false,
+  barZero = false,
   labels,
   tipLabels,
   tipFormat = (v) => v.toLocaleString(),
@@ -40,6 +42,12 @@ export function Sparkline({
   fill?: boolean;
   ecg?: boolean;
   dots?: boolean;
+  /** Render one bar per period (with empty slots for gaps) instead of an
+   *  interpolated line — honest for intermittent series like workouts. */
+  bars?: boolean;
+  /** Bars only: floor at zero (accumulation metrics) vs at the series min
+   *  (level metrics, where a zero-based axis would flatten the variation). */
+  barZero?: boolean;
   labels?: string[];
   tipLabels?: string[]; // hover prefix per point (falls back to labels)
   tipFormat?: (v: number) => string;
@@ -55,7 +63,7 @@ export function Sparkline({
   const pts2 = (values2 ?? [])
     .map((v, i) => ({ v, i }))
     .filter((p): p is { v: number; i: number } => p.v !== null && !Number.isNaN(p.v));
-  if (pts.length < 2) {
+  if (pts.length < (bars ? 1 : 2)) {
     return (
       <svg width="100%" viewBox={`0 0 ${width} ${height}`}>
         <text x={width / 2} y={height / 2} textAnchor="middle" fontSize="11" fill="var(--ink-faint)">
@@ -71,6 +79,8 @@ export function Sparkline({
   for (const p of pts2) domain.push(p.v);
   if (target != null) domain.push(target);
   if (targetBand) domain.push(targetBand[0], targetBand[1]);
+  // Accumulation bars sit on a zero baseline, so pull 0 into the y-domain.
+  if (bars && barZero) domain.push(0);
   const min = Math.min(...domain);
   const max = Math.max(...domain);
   const span = max - min || 1;
@@ -102,11 +112,19 @@ export function Sparkline({
   const last = pts[pts.length - 1];
   const last2 = pts2.length ? pts2[pts2.length - 1] : null;
 
+  // Bar geometry: one slot per period across the full width (gaps stay empty),
+  // so intermittent series read as discrete events rather than a smooth trend.
+  const n = values.length;
+  const slotW = (width - 8) / n;
+  const barW = Math.max(1.5, Math.min(slotW * 0.68, slotW - 1.5));
+  const baseY = y(bars && !barZero ? min : 0); // bar floor: series min (level) or zero
+  const xbar = (i: number) => 4 + (i + 0.5) * slotW;
+
   // nearest point with data to a hovered fraction of the chart
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const f = (e.clientX - rect.left) / rect.width;
-    const target = i0 + f * ispan;
+    const target = bars ? f * (n - 1) : i0 + f * ispan;
     let best = pts[0].i;
     for (const p of pts) if (Math.abs(p.i - target) < Math.abs(best - target)) best = p.i;
     setHover(best);
@@ -120,7 +138,7 @@ export function Sparkline({
     <div className="chart-wrap">
       {hover !== null && hoverVal != null && (
         <Tip
-          leftPct={((hover - i0) / ispan) * 100}
+          leftPct={bars ? ((hover + 0.5) / n) * 100 : ((hover - i0) / ispan) * 100}
           text={`${(tipLabels ?? labels)?.[hover] ? `${(tipLabels ?? labels)![hover]} · ` : ""}${tipFormat(hoverVal)}${hoverVal2 != null ? ` / ${fmt2(hoverVal2)}` : ""}`}
         />
       )}
@@ -153,21 +171,40 @@ export function Sparkline({
             opacity={0.6}
           />
         )}
-        {fill && (
+        {bars &&
+          pts.map((p) => {
+            const top = y(p.v);
+            const h = Math.max(baseY - top, 2); // keep min-floored bars visible
+            return (
+              <rect
+                key={p.i}
+                x={xbar(p.i) - barW / 2}
+                y={top}
+                width={barW}
+                height={h}
+                rx={Math.min(2, barW / 2)}
+                fill={color}
+                opacity={hover === p.i ? 1 : 0.55}
+              />
+            );
+          })}
+        {!bars && fill && (
           <path
             d={`${d} L ${x(last.i)} ${plotH} L ${x(pts[0].i)} ${plotH} Z`}
             fill={color}
             opacity={0.09}
           />
         )}
-        <path
-          d={d}
-          fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinecap="round"
-          className={ecg ? "ecg-path" : undefined}
-        />
+        {!bars && (
+          <path
+            d={d}
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            className={ecg ? "ecg-path" : undefined}
+          />
+        )}
         {d2 && (
           <path d={d2} fill="none" stroke={color2 ?? "var(--ink-soft)"} strokeWidth={2} strokeLinecap="round" />
         )}
@@ -177,14 +214,16 @@ export function Sparkline({
         {hover !== null && hoverVal2 != null && (
           <circle cx={x(hover)} cy={y(hoverVal2)} r={4.5} fill={color2 ?? "var(--ink-soft)"} stroke="var(--bg-raised)" strokeWidth={1.5} />
         )}
-        {dots &&
+        {!bars && dots &&
           pts.map((p) => (
             <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={color} stroke="var(--bg-raised)" strokeWidth={1} />
           ))}
-        {hover !== null && hoverVal != null && (
+        {!bars && hover !== null && hoverVal != null && (
           <circle cx={x(hover)} cy={y(hoverVal)} r={4.5} fill={color} stroke="var(--bg-raised)" strokeWidth={1.5} />
         )}
-        <circle cx={x(last.i)} cy={y(last.v)} r={3.2} fill={color} className={ecg ? "pulsing" : undefined} />
+        {!bars && (
+          <circle cx={x(last.i)} cy={y(last.v)} r={3.2} fill={color} className={ecg ? "pulsing" : undefined} />
+        )}
         {labels &&
           labels.map((l, i) => (
             <text

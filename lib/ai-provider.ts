@@ -41,9 +41,20 @@ export interface ProviderEntry {
 }
 
 export interface ProviderStore {
-  active: ProviderType;
+  active: ProviderType;          // legacy single-provider field; read as the primary
+  primary?: ProviderType;        // preferred provider
+  secondary?: ProviderType;      // fallback used when the primary call throws
   providers: Partial<Record<ProviderType, ProviderEntry>>;
 }
+
+export const PROVIDER_LABELS: Record<ProviderType, string> = {
+  openrouter:      "OpenRouter + Cerebras",
+  "openai-key":    "ChatGPT (API Key)",
+  "openai-oauth":  "ChatGPT (Subscription)",
+  "gemini-key":    "Gemini (API Key)",
+  "anthropic-key": "Anthropic Claude",
+  ollama:          "Ollama (Local)",
+};
 
 type Msg = { role: "system" | "user" | "assistant"; content: any };
 
@@ -72,15 +83,42 @@ function saveStore(store: ProviderStore) {
 }
 
 export function setActive(provider: ProviderType) {
-  const store = getStore() ?? { active: provider, providers: {} };
-  store.active = provider;
+  setRole("primary", provider);
+}
+
+/** Assign a provider to the primary or secondary (fallback) slot. */
+export function setRole(role: "primary" | "secondary", provider: ProviderType | null) {
+  const store = getStore() ?? { active: provider ?? "openrouter", providers: {} };
+  if (role === "primary") {
+    store.primary = provider ?? undefined;
+    if (provider) store.active = provider; // keep legacy field in sync
+    // Primary can't also be the fallback.
+    if (provider && store.secondary === provider) store.secondary = undefined;
+  } else {
+    store.secondary = provider && provider !== store.primary ? provider : undefined;
+  }
   saveStore(store);
+}
+
+export function getRoles(): { primary: ProviderType | null; secondary: ProviderType | null } {
+  const store = getStore();
+  if (!store) {
+    return { primary: process.env.OPENROUTER_API_KEY ? "openrouter" : null, secondary: null };
+  }
+  const primary = store.primary ?? store.active ?? null;
+  const secondary = store.secondary && store.secondary !== primary ? store.secondary : null;
+  return { primary, secondary };
 }
 
 export function saveProvider(provider: ProviderType, entry: ProviderEntry, activate = true) {
   const store = getStore() ?? { active: provider, providers: {} };
   store.providers[provider] = { ...(store.providers[provider] ?? {}), ...entry };
-  if (activate) store.active = provider;
+  if (activate) {
+    store.active = provider;
+    // First provider configured becomes primary automatically; don't steal the
+    // slot from an existing primary (roles are assigned explicitly thereafter).
+    if (!store.primary) store.primary = provider;
+  }
   saveStore(store);
 }
 
@@ -88,18 +126,39 @@ export function removeProvider(provider: ProviderType) {
   const store = getStore();
   if (!store) return;
   delete store.providers[provider];
+  if (store.secondary === provider) store.secondary = undefined;
+  if (store.primary === provider) store.primary = undefined;
   if (store.active === provider) {
-    store.active = (Object.keys(store.providers)[0] as ProviderType) ?? "openrouter";
+    store.active = (store.primary ?? (Object.keys(store.providers)[0] as ProviderType)) ?? "openrouter";
   }
+  if (!store.primary) store.primary = store.active;
   saveStore(store);
 }
 
-function getActive(): { type: ProviderType; entry: ProviderEntry } | null {
+/** Resolve a configured provider's entry, treating env-keyed OpenRouter as configured. */
+function entryFor(store: ProviderStore, p: ProviderType): ProviderEntry | null {
+  const e = store.providers[p];
+  if (e) return e;
+  if (p === "openrouter" && process.env.OPENROUTER_API_KEY) return {};
+  return null;
+}
+
+/** Ordered, deduped, configured-only list of providers to try: [primary, secondary]. */
+function resolveOrder(): { type: ProviderType; entry: ProviderEntry }[] {
   const store = getStore();
-  if (!store) return null;
-  const entry = store.providers[store.active];
-  if (!entry) return null;
-  return { type: store.active, entry };
+  if (!store) return [];
+  const { primary, secondary } = getRoles();
+  const out: { type: ProviderType; entry: ProviderEntry }[] = [];
+  for (const p of [primary, secondary]) {
+    if (!p || out.some((o) => o.type === p)) continue;
+    const entry = entryFor(store, p);
+    if (entry) out.push({ type: p, entry });
+  }
+  return out;
+}
+
+function getActive(): { type: ProviderType; entry: ProviderEntry } | null {
+  return resolveOrder()[0] ?? null;
 }
 
 // ── Public interface ──────────────────────────────────────────────────────────
@@ -120,18 +179,20 @@ export function hasAiKey(): boolean {
   return Boolean(process.env.OPENROUTER_API_KEY);
 }
 
-export async function complete(
-  messages: Msg[],
-  opts: { vision?: boolean; json?: boolean } = {}
-): Promise<string> {
-  const active = getActive();
-  if (!active) return legacyOrComplete(messages, opts);
+/** Result of a fallback-aware call: what was produced and which slot served it. */
+export interface FallbackMeta {
+  usedSecondary: boolean;     // true when the primary threw and the secondary served
+  servedLabel: string;        // human label of the provider that produced the result
+}
 
-  const { type, entry } = active;
+// ── Single-provider dispatch (no fallback) ────────────────────────────────────
+
+async function callProvider(
+  type: ProviderType, entry: ProviderEntry, messages: Msg[],
+  opts: { vision?: boolean; json?: boolean }
+): Promise<string> {
   const def = DEFAULTS[type];
-  const model = opts.vision
-    ? (entry.visionModel || def.visionModel)
-    : (entry.model || def.model);
+  const model = opts.vision ? (entry.visionModel || def.visionModel) : (entry.model || def.model);
 
   switch (type) {
     case "openrouter": {
@@ -158,11 +219,9 @@ export async function complete(
   }
 }
 
-export async function streamCompletion(messages: Msg[]): Promise<ReadableStream<Uint8Array>> {
-  const active = getActive();
-  if (!active) return legacyOrStream(messages);
-
-  const { type, entry } = active;
+async function streamProvider(
+  type: ProviderType, entry: ProviderEntry, messages: Msg[]
+): Promise<ReadableStream<Uint8Array>> {
   const def = DEFAULTS[type];
   const model = entry.model || def.model;
 
@@ -188,6 +247,68 @@ export async function streamCompletion(messages: Msg[]): Promise<ReadableStream<
       return streamOpenAiCompat(`${base}/v1`, "", model, messages);
     }
   }
+}
+
+// ── Fallback-aware public interface ───────────────────────────────────────────
+
+/**
+ * Complete, walking [primary, secondary]: on ANY throw from the primary, retry
+ * on the secondary. Returns the text plus which slot served it.
+ */
+export async function completeWithFallback(
+  messages: Msg[], opts: { vision?: boolean; json?: boolean } = {}
+): Promise<{ text: string } & FallbackMeta> {
+  const order = resolveOrder();
+  if (order.length === 0) {
+    return { text: await legacyOrComplete(messages, opts), usedSecondary: false, servedLabel: PROVIDER_LABELS.openrouter };
+  }
+  let lastErr: unknown;
+  for (let i = 0; i < order.length; i++) {
+    try {
+      const text = await callProvider(order[i].type, order[i].entry, messages, opts);
+      return { text, usedSecondary: i > 0, servedLabel: PROVIDER_LABELS[order[i].type] };
+    } catch (e) {
+      lastErr = e;
+      if (i < order.length - 1) console.warn(`AI primary (${order[i].type}) failed, falling back:`, e);
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Open a completion stream, walking [primary, secondary]. Because the stream is
+ * awaited before the first byte, connection-time failures (auth/429/5xx/network)
+ * throw here and switch cleanly to the secondary (pre-stream fallback).
+ */
+export async function streamWithFallback(
+  messages: Msg[]
+): Promise<{ stream: ReadableStream<Uint8Array> } & FallbackMeta> {
+  const order = resolveOrder();
+  if (order.length === 0) {
+    return { stream: await legacyOrStream(messages), usedSecondary: false, servedLabel: PROVIDER_LABELS.openrouter };
+  }
+  let lastErr: unknown;
+  for (let i = 0; i < order.length; i++) {
+    try {
+      const stream = await streamProvider(order[i].type, order[i].entry, messages);
+      return { stream, usedSecondary: i > 0, servedLabel: PROVIDER_LABELS[order[i].type] };
+    } catch (e) {
+      lastErr = e;
+      if (i < order.length - 1) console.warn(`AI primary (${order[i].type}) stream failed, falling back:`, e);
+    }
+  }
+  throw lastErr;
+}
+
+// Back-compat thin wrappers — existing callers keep working and get fallback for free.
+export async function complete(
+  messages: Msg[], opts: { vision?: boolean; json?: boolean } = {}
+): Promise<string> {
+  return (await completeWithFallback(messages, opts)).text;
+}
+
+export async function streamCompletion(messages: Msg[]): Promise<ReadableStream<Uint8Array>> {
+  return (await streamWithFallback(messages)).stream;
 }
 
 export function parseJsonReply<T>(text: string): T {

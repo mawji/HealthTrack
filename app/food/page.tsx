@@ -19,6 +19,7 @@ function guessMealType(d: Date): MealType {
   return "other";
 }
 import { IconChip, ForkIcon } from "@/components/icons";
+import Toast from "@/components/Toast";
 
 export default function Food() {
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -36,6 +37,7 @@ export default function Food() {
   const [logDate, setLogDate] = useState("");
   const [logTime, setLogTime] = useState("");
   const [note, setNote] = useState("");
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
   const loadLog = () =>
     fetch("/api/food/log")
@@ -71,6 +73,8 @@ export default function Food() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
+      const fellBackTo = res.headers.get("X-AI-Fallback");
+      if (fellBackTo) setFallbackNote(`Primary model unavailable — using ${fellBackTo}.`);
       setAnalysis(json);
       const now = new Date();
       setMeal(guessMealType(now));
@@ -141,6 +145,7 @@ export default function Food() {
 
   return (
     <main className="page">
+      <Toast message={fallbackNote} onDone={() => setFallbackNote(null)} tone="warn" />
       <header className="rise rise-1" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Food.</h1>
         <p className="page-sub">

@@ -99,8 +99,13 @@ export async function getDay(date: string): Promise<{ day: DaySummary; demo: boo
   }
 
   try {
-    const day = await fetchDay(date);
-    upsertDay(date, { summary: day, settled });
+    // Capture workouts too, so a day that settles via the detail view (not just
+    // the range fetch) lands its sessions in the archive for Trends.
+    const [day, workouts] = await Promise.all([
+      fetchDay(date),
+      fetchWorkouts(date, date).catch(() => [] as WorkoutSession[]),
+    ]);
+    upsertDay(date, { summary: day, workouts, settled });
     return { day, demo: false };
   } catch {
     if (archived) return { day: archived.summary, demo: false };
@@ -120,10 +125,18 @@ export async function getRecentDays(n: number): Promise<{ days: DaySummary[]; de
   const start = addDaysStr(end, -(n - 1));
   const archived = getArchivedRange(start, end);
 
-  // Live span: from the oldest date NOT settled in the archive through today.
+  // A settled archived day is reusable only if its workouts were also captured.
+  // Legacy rows that settled before workouts were archived (workouts === null)
+  // are treated as incomplete so the live fetch below repairs them.
+  const complete = (d: string) => {
+    const a = archived.get(d);
+    return !!a?.settled && isSettledDate(d) && a.workouts != null;
+  };
+
+  // Live span: from the oldest incomplete date in range through today.
   let liveStart = end;
   for (let d = start; d <= end; d = addDaysStr(d, 1)) {
-    if (!(archived.get(d)?.settled && isSettledDate(d))) {
+    if (!complete(d)) {
       liveStart = d;
       break;
     }
@@ -133,9 +146,24 @@ export async function getRecentDays(n: number): Promise<{ days: DaySummary[]; de
   let live = new Map<string, DaySummary>();
   if (liveStart <= end) {
     try {
-      const fetched = await fetchDays(liveStart, end);
+      // Fetch workouts alongside summaries so a day's sessions are archived when
+      // it settles — otherwise settled days show no workouts in Trends. Page
+      // deep enough to cover the (possibly healing) live window.
+      const span = Math.round((Date.parse(end + "T12:00:00Z") - Date.parse(liveStart + "T12:00:00Z")) / 86400000) + 1;
+      const [fetched, liveWorkouts] = await Promise.all([
+        fetchDays(liveStart, end),
+        fetchWorkouts(liveStart, end, Math.min(40, Math.max(8, span))).catch(() => [] as WorkoutSession[]),
+      ]);
       live = new Map(fetched.map((d) => [d.date, d]));
-      for (const d of fetched) upsertDay(d.date, { summary: d, settled: isSettledDate(d.date) });
+      const woByDate = new Map<string, WorkoutSession[]>();
+      for (const w of liveWorkouts) {
+        const arr = woByDate.get(w.date);
+        if (arr) arr.push(w);
+        else woByDate.set(w.date, [w]);
+      }
+      for (const d of fetched) {
+        upsertDay(d.date, { summary: d, workouts: woByDate.get(d.date) ?? [], settled: isSettledDate(d.date) });
+      }
     } catch {
       // fall back to snapshots below; demo only if nothing at all
       if (archived.size === 0) return { days: demoRange(n), demo: true };

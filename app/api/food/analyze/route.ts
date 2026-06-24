@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { complete, hasAiKey, parseJsonReply } from "@/lib/openrouter";
+import { hasAiKey, parseJsonReply } from "@/lib/openrouter";
+import { completeWithFallback } from "@/lib/ai-provider";
 import { FoodAnalysis } from "@/lib/types";
 
 const JSON_SHAPE = `Reply with ONLY a JSON object, no prose:
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const reply = await complete(
+    const { text: reply, usedSecondary, servedLabel } = await completeWithFallback(
       [
         {
           role: "user",
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
       { vision: hasImage }
     );
     const analysis = parseJsonReply<FoodAnalysis>(reply);
-    return NextResponse.json(analysis);
+    return NextResponse.json(analysis, usedSecondary ? { headers: { "X-AI-Fallback": servedLabel } } : undefined);
   } catch (e: any) {
     console.error("Food analysis failed:", e);
     return NextResponse.json({ error: String(e.message ?? e) }, { status: 502 });

@@ -3,7 +3,7 @@
 // The detail blob never syncs to Google Health — it lives only in the local
 // workout-detail.json side-store, keyed by session id.
 
-import { WorkoutDetail } from "./types";
+import { WorkoutDetail, WorkoutExercise } from "./types";
 
 export const INTENSITIES = ["easy", "moderate", "hard"] as const;
 export type Intensity = (typeof INTENSITIES)[number];
@@ -23,6 +23,39 @@ const posNum = (v: unknown, max: number): number | undefined => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.min(Math.round(n * 10) / 10, max) : undefined;
 };
+
+/** Validate an untrusted exercises array into WorkoutExercise[] (or undefined).
+ *  Shared by workout detail (completed) and the training plan (planned). */
+export function sanitizeExercises(raw: unknown): WorkoutExercise[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .slice(0, 30)
+    .map((x) => {
+      const ex = (x ?? {}) as Record<string, unknown>;
+      const name = str(ex.name, 80);
+      if (!name) return null;
+      const setList = Array.isArray(ex.setList)
+        ? ex.setList
+            .slice(0, 50)
+            .map((s) => {
+              const row = (s ?? {}) as Record<string, unknown>;
+              return { reps: posInt(row.reps, 999), weightKg: posNum(row.weightKg, 1000) };
+            })
+            .filter((s) => s.reps != null || s.weightKg != null)
+        : undefined;
+      const item: WorkoutExercise = {
+        exerciseId: str(ex.exerciseId, 64),
+        name,
+        sets: posInt(ex.sets, 99),
+        reps: posInt(ex.reps, 999),
+        weightKg: posNum(ex.weightKg, 1000),
+        setList: setList && setList.length ? setList : undefined,
+      };
+      return item;
+    })
+    .filter((x): x is WorkoutExercise => x !== null);
+  return out.length ? out : undefined;
+}
 
 /** True when a detail blob carries no usable information. */
 export function detailIsEmpty(d: WorkoutDetail | undefined): boolean {
@@ -50,22 +83,7 @@ export function sanitizeDetail(raw: unknown): WorkoutDetail | undefined {
   const e = Math.round(Number(r.effort));
   if (Number.isFinite(e) && e >= 1 && e <= 10) effort = e;
 
-  const exercises = Array.isArray(r.exercises)
-    ? r.exercises
-        .slice(0, 30)
-        .map((x) => {
-          const ex = (x ?? {}) as Record<string, unknown>;
-          const name = str(ex.name, 80);
-          if (!name) return null;
-          return {
-            name,
-            sets: posInt(ex.sets, 99),
-            reps: posInt(ex.reps, 999),
-            weightKg: posNum(ex.weightKg, 1000),
-          };
-        })
-        .filter((x): x is NonNullable<typeof x> => x !== null)
-    : undefined;
+  const exercises = sanitizeExercises(r.exercises);
 
   const out: WorkoutDetail = {
     intensity,
@@ -77,7 +95,15 @@ export function sanitizeDetail(raw: unknown): WorkoutDetail | undefined {
   return detailIsEmpty(out) ? undefined : out;
 }
 
-function fmtExercise(ex: NonNullable<WorkoutDetail["exercises"]>[number]): string {
+function fmtExercise(ex: WorkoutExercise): string {
+  // Per-set rows (varying sets): compact "Bench 3 sets: 10×60, 8×60, 6×65".
+  if (ex.setList?.length) {
+    const rows = ex.setList
+      .slice(0, 6)
+      .map((r) => `${r.reps ?? "?"}${r.weightKg ? `×${r.weightKg}` : ""}`)
+      .join(", ");
+    return `${ex.name} ${ex.setList.length} sets: ${rows}`;
+  }
   let s = ex.name;
   if (ex.sets && ex.reps) s += ` ${ex.sets}×${ex.reps}`;
   else if (ex.reps) s += ` ${ex.reps} reps`;

@@ -38,8 +38,11 @@ export async function GET() {
   let account: { profile: any; settings: any; devices: any[] } = { profile: null, settings: null, devices: [] };
 
   if (connected) {
-    scopes = await grantedScopes();
-    try { account = await fetchAccount(); } catch {}
+    // Both are independent live Google calls — run them concurrently so their
+    // latencies overlap instead of adding up.
+    const [scopesRes, accountRes] = await Promise.allSettled([grantedScopes(), fetchAccount()]);
+    if (scopesRes.status === "fulfilled") scopes = scopesRes.value;
+    if (accountRes.status === "fulfilled") account = accountRes.value;
   }
 
   const permissions = SCOPE_LABELS.map((s) => ({

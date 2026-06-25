@@ -316,6 +316,99 @@ function listDaily(dataType: string, field: string, start: string, endInclusive:
   );
 }
 
+/**
+ * Latest body-weight reading per civil day (grams), from raw observations.
+ *
+ * Google's daily rollup returns `weightGramsAvg` — the mean of every reading
+ * that day. For a point-in-time metric like weight that's wrong when a day has
+ * more than one reading (e.g. a partner also steps on the same scale, or you
+ * re-weigh): the average is a number that was never actually measured. We take
+ * the most recent reading instead, which is both the truer "today's weight" and
+ * resilient to a stray reading from someone else (yours, taken after, wins).
+ * Falls back to the averaged rollup only if the raw query errors.
+ */
+/**
+ * Sub-day weight windows over a physical-time range, paginated. The v4 API does
+ * not expose raw weight observations to third-party clients (the `weight`
+ * dataPoints list returns nothing), but the physical-time rollUp DOES return
+ * per-window averages with start/end times — fine enough windows isolate
+ * individual readings. Chunked by 30 days to stay well under page limits.
+ */
+async function weightWindows(start: string, endInclusive: string, windowSeconds: number): Promise<any[]> {
+  const startIso = localMidnightIso(start);
+  const endIso = localMidnightIso(addDays(endInclusive, 1));
+  const out: any[] = [];
+  let chunkStart = start;
+  while (localMidnightIso(chunkStart) < endIso) {
+    const chunkEndExclusive = addDays(chunkStart, 30);
+    const cStartIso = localMidnightIso(chunkStart) < startIso ? startIso : localMidnightIso(chunkStart);
+    const cEndIso = localMidnightIso(chunkEndExclusive) < endIso ? localMidnightIso(chunkEndExclusive) : endIso;
+    let pageToken = "";
+    do {
+      const res: any = await gFetch(`/users/me/dataTypes/weight/dataPoints:rollUp`, {
+        method: "POST",
+        body: {
+          range: { startTime: cStartIso, endTime: cEndIso },
+          windowSize: `${windowSeconds}s`,
+          pageSize: 1000,
+          ...(pageToken ? { pageToken } : {}),
+        },
+      });
+      out.push(...(res?.rollupDataPoints ?? res?.dataPoints ?? []));
+      pageToken = res?.nextPageToken ?? "";
+    } while (pageToken);
+    chunkStart = chunkEndExclusive;
+  }
+  return out;
+}
+
+/**
+ * Body weight per civil day (grams) taking the LATEST reading of the day, not
+ * the daily average.
+ *
+ * Google's daily rollup returns `weightGramsAvg` — the mean of every reading
+ * that day. For a point-in-time metric like weight that's wrong when a day has
+ * more than one reading: e.g. a partner also steps on the same scale, or you
+ * re-weigh — the average is a number that was never actually measured. We pull
+ * fine intraday windows and keep the most recent non-empty one, which is both
+ * the truer "today's weight" and resilient to a stray reading from someone else
+ * (yours, taken after, wins — even if their reading still lingers in the API
+ * after deletion). Falls back to the averaged rollup if the windowed query
+ * yields nothing.
+ */
+async function latestWeightByDay(start: string, endInclusive: string): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  try {
+    // 20-minute windows: two household members are very unlikely to weigh in the
+    // same window, so each reading lands in its own bucket with a timestamp.
+    const windows = await weightWindows(start, endInclusive, 1200);
+    const best = new Map<string, { t: number; grams: number }>();
+    for (const w of windows) {
+      const st = w.startTime;
+      const grams = Number(w.weight?.weightGramsAvg);
+      if (!st || !Number.isFinite(grams) || grams <= 0) continue;
+      const t = new Date(st).getTime();
+      const day = localDateStr(new Date(st)); // civil day in APP_TZ
+      const cur = best.get(day);
+      if (!cur || t > cur.t) best.set(day, { t, grams });
+    }
+    if (best.size > 0) {
+      for (const [day, v] of best) m.set(day, v.grams);
+      return m;
+    }
+  } catch {
+    // fall through to the averaged rollup
+  }
+  // Fallback: averaged daily rollup so weight still shows if windows are empty.
+  const roll = await dailyRollUp("weight", start, addDays(endInclusive, 1)).catch(() => [] as any[]);
+  for (const p of roll) {
+    const date = fromDateObj(p.civilStartTime?.date);
+    const grams = Number(p.weight?.weightGramsAvg);
+    if (date && Number.isFinite(grams)) m.set(date, grams);
+  }
+  return m;
+}
+
 // -- Data assembly -----------------------------------------------
 
 const STAGE_MAP: Record<string, SleepSegment["stage"]> = {
@@ -444,7 +537,7 @@ async function fetchAggregates(start: string, endInclusive: string): Promise<Dai
       dailyRollUp("distance", start, endEx),
       dailyRollUp("floors", start, endEx),
       dailyRollUp("nutrition-log", start, endEx),
-      dailyRollUp("weight", start, endEx),
+      latestWeightByDay(start, endInclusive), // latest reading wins, not the daily average
       listDaily("daily-resting-heart-rate", "daily_resting_heart_rate", start, endInclusive),
       listDaily("daily-oxygen-saturation", "daily_oxygen_saturation", start, endInclusive),
       listDaily("daily-heart-rate-variability", "daily_heart_rate_variability", start, endInclusive),
@@ -477,7 +570,7 @@ async function fetchAggregates(start: string, endInclusive: string): Promise<Dai
     distance: byDay(distance, (p) => num(p.distance?.millimetersSum)),
     floors: byDay(floors, (p) => num(p.floors?.countSum)),
     caloriesIn: byDay(nutrition, (p) => num(p.nutritionLog?.energy?.kcalSum ?? p.nutritionLog?.energy?.kcal)),
-    weight: byDay(weight, (p) => num(p.weight?.weightGramsAvg)),
+    weight, // already a Map<civilDate, grams> of the latest reading per day
     restingHr: new Map(
       rhr.map((p) => [
         fromDateObj(p.dailyRestingHeartRate?.date),

@@ -36,6 +36,17 @@ import {
   computeHabitStatus,
   formatHabitForCoach,
 } from "./habits";
+import { getProfile, deriveProfile, ACTIVITY_LABELS, GOAL_LABELS } from "./profile";
+import { formatEvidenceForCoach } from "./evidence";
+import {
+  summarizeWeeklyActivity,
+  classifyTrainingBalance,
+  recommendTrainingIntensity,
+  formatExerciseForCoach,
+} from "./coach/exercise-rules";
+import { computeTargets, formatTargetsForCoach } from "./coach/nutrition-targets";
+import { formatPreventionForCoach } from "./coach/prevention";
+import { formatPlanForCoach } from "./training-plan";
 
 /** A meal normalized across the local log and Google Health for the coach. */
 type CoachMeal = {
@@ -196,6 +207,29 @@ export async function readinessForDate(date = localDateStr()): Promise<Readiness
   return computeReadiness(days[idx], days.slice(0, idx));
 }
 
+/**
+ * Latest synced body weight (kg) from real device data, newest-first, or null
+ * when disconnected/demo. Profile BMI prefers this over the manual figure; demo
+ * weight is deliberately ignored so a disconnected app doesn't fabricate a BMI.
+ */
+export async function latestDeviceWeightKg(): Promise<number | null> {
+  if (!isConnected()) return null;
+  // Read the latest weight from the local archive only — never trigger a live
+  // Google fetch here. This runs on every Profile load just to populate BMI,
+  // which tolerates a slightly-stale weight; deriveProfile falls back to the
+  // manual figure when the archive has none. (Archive rows are kept fresh by
+  // the dashboard/trends views, which fetch live and snapshot recent days.)
+  const end = localDateStr();
+  const start = addDaysStr(end, -60); // weigh-ins are sparse; widen the lookback
+  const archived = getArchivedRange(start, end);
+  const dates = [...archived.keys()].sort();
+  for (let i = dates.length - 1; i >= 0; i--) {
+    const w = archived.get(dates[i])!.summary.weightKg;
+    if (w != null) return w;
+  }
+  return null;
+}
+
 /** Trend series: archived days + a live fetch for only the unsettled window. */
 export async function getTrends(days: number): Promise<TrendsPayload | null> {
   if (!isConnected()) return null;
@@ -287,8 +321,9 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
   // App-derived readiness FIRST, scored against the same 45-day window as the
   // Daily dial so the coach answers "am I recovered?" with the dial's number
   // instead of re-reasoning from raw HRV/RHR (and possibly contradicting it).
+  let readiness: ReadinessScore | null = null;
   try {
-    const readiness = await readinessForDate();
+    readiness = await readinessForDate();
     if (readiness) {
       const drivers = readiness.reasons.length ? ` Drivers: ${readiness.reasons.join("; ")}.` : "";
       const building = readiness.confident ? "" : " (baseline still building)";
@@ -300,6 +335,75 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     }
   } catch {
     // readiness is optional context
+  }
+
+  // Deterministic exercise read: weekly active-zone minutes + strength days vs
+  // ODPHP, plus a readiness-gated intensity call. The app computes these numbers
+  // so the coach quotes them rather than summing the week itself. See
+  // lib/coach/exercise-rules.ts.
+  try {
+    const limitations = getProfile().conditions;
+    const weekly = summarizeWeeklyActivity(range, workouts);
+    if (weekly.daysCounted > 0) {
+      const intensity = recommendTrainingIntensity(readiness, weekly, limitations);
+      const balance = classifyTrainingBalance(weekly);
+      lines.push(formatExerciseForCoach(weekly, intensity, balance), "");
+    }
+  } catch {
+    // exercise read is optional context
+  }
+
+  // User profile + deterministic derivations (BMI, healthy-weight range, and the
+  // safety-critical fields still missing before precise targets). The coach
+  // quotes these figures; it must NOT recompute BMI or invent targets. Device
+  // weight (newest in range) is preferred over the manual figure for BMI.
+  try {
+    const profile = getProfile();
+    let deviceWeight: number | null = null;
+    if (!demo) {
+      for (let i = range.length - 1; i >= 0; i--) {
+        if (range[i].weightKg != null) {
+          deviceWeight = range[i].weightKg;
+          break;
+        }
+      }
+    }
+    const d = deriveProfile(profile, deviceWeight);
+    const parts: string[] = [];
+    if (d.age != null) parts.push(`age ${d.age}`);
+    if (profile.sex) parts.push(profile.sex);
+    if (profile.heightCm) parts.push(`height ${profile.heightCm}cm`);
+    if (d.weightKgResolved != null) parts.push(`weight ${d.weightKgResolved}kg (${d.weightSource})`);
+    if (d.bmi != null) parts.push(`BMI ${d.bmi} (${d.bmiCategory}, CDC framing)`);
+    if (d.healthyWeightRangeKg)
+      parts.push(`healthy-weight range ${d.healthyWeightRangeKg.min}–${d.healthyWeightRangeKg.max}kg`);
+    if (profile.activityLevel) parts.push(`activity: ${ACTIVITY_LABELS[profile.activityLevel]}`);
+    if (profile.goal) parts.push(`goal: ${GOAL_LABELS[profile.goal]}${profile.targetRateKgPerWeek ? ` at ${profile.targetRateKgPerWeek}kg/week` : ""}`);
+    if (profile.pregnantOrLactating) parts.push("pregnant or lactating (use conservative defaults)");
+    if (profile.conditions) parts.push(`conditions: ${profile.conditions}`);
+    if (parts.length) {
+      lines.push("== Profile (user-entered; BMI/ranges are deterministic, not a diagnosis) ==", parts.join(", "));
+      if (d.missingForTargets.length) {
+        lines.push(
+          `Missing for precise targets: ${d.missingForTargets.join(", ")} — ask for these before committing to exact calorie/macro targets or detailed plans.`
+        );
+      }
+      lines.push("");
+    }
+
+    // Deterministic nutrition targets (#11): calorie/macro/hydration ranges from
+    // the profile, with a weekly intake comparison so the coach frames the WEEK,
+    // not a single day. Only emitted when the profile is complete enough.
+    const targets = computeTargets(profile, d.weightKgResolved, d.age);
+    if (targets.ok) {
+      const last7 = range.slice(-7).filter((x) => x.caloriesIn > 0);
+      const recentIntake = last7.length
+        ? { avgKcal: Math.round(last7.reduce((s, x) => s + x.caloriesIn, 0) / last7.length), daysLogged: last7.length }
+        : null;
+      lines.push(formatTargetsForCoach(targets, recentIntake), "");
+    }
+  } catch {
+    // profile is optional context
   }
 
   lines.push(`== Daily metrics (last ${days} days, oldest first) ==`);
@@ -332,6 +436,15 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
           (w.source === "journal" ? " [journal]" : "")
       );
     }
+  }
+
+  // Upcoming PLANNED workouts (separate from completed history above). Kept
+  // clearly distinct so the coach never logs a future plan as done.
+  try {
+    const plan = formatPlanForCoach();
+    if (plan) lines.push("", plan);
+  } catch {
+    // planned workouts are optional context
   }
 
   if (waterMl !== null) {
@@ -415,6 +528,22 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     }
   }
 
+  // Conservative prevention review from the user's own labs/BP — educational
+  // category flags + clinician-review prompts, with urgent routing for red
+  // flags. Deterministic; the coach never diagnoses. See lib/coach/prevention.ts.
+  try {
+    const prevention = formatPreventionForCoach();
+    if (prevention) lines.push("", prevention);
+  } catch {
+    // prevention review is optional context
+  }
+
+  // Sourced evidence rules the coach may cite (general population guidance; the
+  // user's own deterministic values above take precedence). Static for now — all
+  // active rules are injected; intent-based retrieval comes when the set grows.
+  const evidence = formatEvidenceForCoach();
+  if (evidence) lines.push("", evidence);
+
   if (demo) {
     lines.push("", "NOTE: Google Health is not connected yet — the metrics above are demo data. Make this clear if the user asks about their real numbers.");
   }
@@ -422,57 +551,4 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
   return { text: lines.join("\n"), demo };
 }
 
-export const COACH_PERSONA = `You are the in-app AI Health Coach of HealthTrack. You analyze user health metrics (steps, heart rate, sleep stages, HRV, SpO2, breathing rate, weight, logged meals, and medical record summaries) to provide targeted, evidence-based wellness coaching.
-
-=== CORE GUIDELINES ===
-
-1. BIOMARKER CORRELATION & ANALYSIS FRAMEWORK:
-   - Recovery & Readiness: When the "== Readiness (app-derived…) ==" block is present, treat that score/band as the authoritative recovery read — it is the SAME number shown on the Daily dial. Quote it and base any advice on training intensity vs. recovery on it; do NOT re-derive a competing read from raw HRV/RHR or contradict the score. It is a morning snapshot from HRV, resting HR, and last night's sleep measured against the user's own baseline — not a live reading and NOT a Google-provided metric, so never call it Google's score. Use the underlying HRV–RHR correlation (HRV dropping while RHR rises = physiological stress, fatigue, or possible illness) to explain WHY the score reads as it does, and when readiness is low, suggest active recovery or extra sleep.
-   - Sleep Quality: Do not just report total duration. Analyze sleep efficiency (target >85%), deep sleep duration (target 10-20%), and REM sleep (target 20-25%). If deep sleep is low, suggest sleep hygiene tips (cooler room, no screens, consistent bedtime).
-   - Energy Balance: Look at "calories in" (nutrition logs) vs "calories out" (activity burn). Check protein, carbohydrate, and fat macros. Highlight positive patterns (like meeting protein targets) or identify energy deficits/surpluses relative to activity levels.
-   - Cardiovascular Load: Correlate active zone minutes with steps. If activity is high, check if vitals (HRV, sleep) indicate the body is recovering well.
-   - Goals: When a "== Goals ==" block is present, treat each goal's status (met / on track / needs attention) as authoritative — it is computed deterministically from the user's latest value vs the target they set. Quote it; do NOT recompute it or invent/change targets. Prioritize "needs attention" goals with at most 1–2 practical micro-steps grounded in the number and gap shown. For lab-backed goals that stay out of range, frame it carefully and suggest they review it with their clinician — never diagnose.
-
-2. STYLE & COMMUNICATION PROTOCOL:
-   - Extreme Brevity: Your total text response must be under 3-4 sentences. Avoid long walls of text; utilize visual cards to convey stats and let them do the heavy lifting.
-   - Ground in Numbers: Every health observation MUST be directly backed by the user's actual numbers from the context (e.g., "Your HRV averaged 32ms this week, down from your typical 45ms"). Never speak in generic terms.
-   - Empirical & Warm Tone: Speak like an encouraging, highly knowledgeable personal coach. Be supportive and warm, never critical, preachy, or clinical/sterile.
-   - Bite-sized Actionability: Do not overwhelm. Provide at most 2-3 specific, highly practical recommendations per interaction. Focus on micro-habits (e.g., "Try to step away from screens 30 minutes before your target 10:30 PM bedtime tonight").
-   - Acknowledge Demo Mode: If the context indicates "demo mode" (Google Health not connected), gently remind the user of this if they ask about their real metrics.
-
-3. CLINICAL SAFETY BOUNDARIES:
-   - Absolute Prohibition on Diagnosis: You are a wellness coach, not a doctor. Never diagnose illnesses or prescribe treatments.
-   - Escalate Persistent Trends: If you notice severe or persistent negative trends (e.g., resting heart rate steadily rising over 5 days, or SpO2 consistently under 93%), frame it carefully and advise them to consult a qualified primary care clinician.
-
-4. VISUAL CARDS (RENDERED INLINE IN CHAT):
-   When you reference health statistics, show them visually by emitting a fenced code block with language tag "viz" containing exactly ONE JSON object. The app renders these as native charts. Example:
-
-\`\`\`viz
-{"type":"sleep","durationMin":431,"efficiency":96,"startTime":"23:12","endTime":"06:48","deep":77,"light":209,"rem":101,"wake":34}
-\`\`\`
-
-   Available card specs (all numbers must come from the user's actual data in the context):
-   - {"type":"steps","steps":8234,"goal":10000,"distance":5.9,"floors":9,"kcal":2643}
-   - {"type":"heart","resting":62,"points":[{"time":"06:00","min":58,"max":71},...],"zones":[{"name":"Cardio","minutes":18}]}  — build 8-15 points across the day from the intraday data
-   - {"type":"sleep","durationMin":431,"efficiency":96,"startTime":"23:12","endTime":"06:48","deep":77,"light":209,"rem":101,"wake":34}
-   - {"type":"vitals","spo2":96.8,"hrv":52,"breathing":15.2,"weight":76.1}  — include only the metrics relevant to the discussion
-   - {"type":"energy","caloriesIn":1980,"caloriesOut":2643}
-   - {"type":"weeklySteps","values":[8200,11050,9400,12050,7600,10300,12050]}  — last 7 days, oldest first
-   - {"type":"metric","title":"Deep Sleep","value":"77 min","color":"sleep","progress":0.64,"details":[{"label":"7-day avg","value":"68 min"}],"chartType":"bar","chartData":[60,72,55,80,77],"chartLabels":["M","T","W","T","F"]}  — flexible card for anything else; color is one of sleep|activity|heart|breath|food; progress (0-1), details, chartType ("sparkline"|"bar"), chartData and chartLabels are all optional
-
-   Rules: strictly valid JSON (double quotes, no trailing commas, no comments). One JSON object per viz block. Put each block on its own lines between your prose. Use 1-2 cards per reply, only when they add value.
-
-5. ACTIONS (LOGGING ON THE USER'S BEHALF):
-   When the user reports a workout, meal, or water they had (e.g. "I did a legs workout for an hour", "log my 2-egg omelette for breakfast"), log it by emitting a fenced code block with language tag "log" containing ONE JSON object. The app executes it and writes to the local log AND to Google Health when connected:
-
-\`\`\`log
-{"action":"logWorkout","name":"Leg day","exerciseType":"STRENGTH_TRAINING","durationMin":60,"date":"2026-06-11","startTime":"18:00","calories":300,"notes":"legs"}
-\`\`\`
-
-   Actions available:
-   - logWorkout: name (short label), exerciseType (one of WALKING, RUNNING, BIKING, HIIT, STRENGTH_TRAINING, WEIGHTS, BODY_WEIGHT, CALISTHENICS, CROSSFIT, CORE_TRAINING, YOGA, PILATES, STRETCHING, SWIMMING_POOL, ELLIPTICAL, TREADMILL, ROWING_MACHINE, SPINNING, BOXING, MARTIAL_ARTS, DANCING, SOCCER, BASKETBALL, TENNIS, HIKING, JUMPING_ROPE, WORKOUT), durationMin, date (yyyy-MM-dd; use the current date from this prompt for "today"), startTime (HH:MM 24h; estimate from context, e.g. "this morning" ≈ 08:00), calories (estimate from type/duration/user weight if not given), notes (muscle groups or details the user mentioned, e.g. "legs").
-   - logWater: {"action":"logWater","glasses":2} — each glass is 250 ml.
-   - logFood: {"action":"logFood","name":"2-egg omelette","mealType":"breakfast","calories":190,"proteinG":14,"carbsG":3,"fatG":14,"glycemicLoad":1,"loggedAt":"2026-06-11T08:00:00","notes":"two eggs, no oil"} — mealType is one of breakfast|lunch|dinner|other (infer from the meal or time of day). Estimate calories and macros from the meal description using your nutrition knowledge; glycemicLoad ≈ GI of the dish × net carbs ÷ 100 (≈0 for low-carb meals). loggedAt is ISO (yyyy-MM-ddTHH:MM:SS); use the current date/time from this prompt for "today"/"now", or estimate from context (e.g. "breakfast" ≈ 08:00). notes captures portion assumptions.
-   - logHabit: {"action":"logHabit","habitId":"read","value":10,"date":"2026-06-11","note":"before bed"} — log a user-defined habit. habitId MUST be one of the ids listed under "== Habits (today) ==" in the context (see the "logHabit ids" line); never invent one. value is a number for count/duration/quantity habits (in the habit's unit), or a boolean for yes/no habits — for a yes/no AVOID habit, value true means the avoided behavior happened (a slip) and false/omitted means it was avoided. date is yyyy-MM-dd (use today's date for "today"). Only use this when the user clearly reports doing a tracked habit (e.g. "read for 15 minutes", "that was my 2nd coffee"); if no matching habit id exists, do not emit a logHabit block.
-
-   Rules: only log when the user clearly reports a workout, meal, drink, or habit (not for hypotheticals or plans). Confirm what you logged in one short sentence BEFORE the block. Never emit the same log block twice in one reply. If key facts are missing, assume sensibly and say what you assumed.`;
+export { COACH_PERSONA } from "./coach/persona";

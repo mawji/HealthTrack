@@ -77,6 +77,29 @@ export interface HealthPayload {
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "other";
 
+// ── Nutrition provenance ────────────────────────────────────────────────────
+// Where a food entry's macros came from, and how trustworthy each part is. This
+// is the shared "show the source + confidence" affordance the evidence-coach
+// build reuses across barcode (Open Food Facts), USDA FDC, label, user, and
+// model paths. Built first for Track A (barcode); Phase 4 extends it for FDC.
+export type NutritionSource = "photo" | "text" | "barcode" | "fdc" | "label" | "user" | "model";
+
+export interface FoodProvenance {
+  source: NutritionSource;
+  sourceLabel?: string; // human label, e.g. "Open Food Facts"
+  sourceUrl?: string; // link to the product / source page
+  attribution?: string; // required attribution text, e.g. "Source: Open Food Facts (ODbL)"
+  barcode?: string;
+  brand?: string;
+  servingG?: number; // grams the macros are scaled to
+  portionEstimated?: boolean; // true when portion is an editable estimate, not measured
+  gi?: number; // source-backed glycemic index (glucose=100); enables a real GL
+  giSource?: string; // attribution for the GI value, e.g. "Intl. GI Tables 2008/2021"
+  nova?: number; // NOVA processing group, 1–4
+  ingredients?: string;
+  allergens?: string[];
+}
+
 export interface FoodEntry {
   id: string;
   loggedAt: string; // ISO
@@ -90,6 +113,7 @@ export interface FoodEntry {
   confidence: "low" | "medium" | "high";
   notes?: string;
   photo?: string; // small data-URL thumbnail of the analyzed photo
+  provenance?: FoodProvenance; // source/confidence of the macros (barcode, FDC, …)
   syncedToHealth: boolean; // written back to Google Health
   googleName?: string | null; // dataPoint resource name when synced — provenance key
 }
@@ -103,6 +127,7 @@ export interface FoodAnalysis {
   glycemicLoad: number;
   confidence: "low" | "medium" | "high";
   notes: string;
+  provenance?: FoodProvenance; // set on barcode/FDC paths; absent for pure model estimates
 }
 
 export type LabFlag = "normal" | "high" | "low" | "abnormal" | "critical";
@@ -136,12 +161,25 @@ export interface MedicalRecord {
 /** App-local structured training detail. NOT synced to Google Health (the API
  *  has no field for it). Stored in a side-store keyed by session id and merged
  *  on read, same as the type-override store. */
+/** One exercise within a workout (or a planned workout). The uniform
+ *  sets/reps/weightKg shortcut covers the common case; setList holds per-set
+ *  rows when they vary. exerciseId links to the wger/custom library for image +
+ *  muscles. Backward-compatible with the original {name,sets,reps,weightKg}. */
+export interface WorkoutExercise {
+  exerciseId?: string; // wger uuid or custom id (library link); absent for free-typed
+  name: string;
+  sets?: number; // uniform shortcut: N sets …
+  reps?: number; // … of M reps …
+  weightKg?: number; // … at W kg
+  setList?: { reps?: number; weightKg?: number }[]; // per-set rows, when sets vary
+}
+
 export interface WorkoutDetail {
   intensity?: "easy" | "moderate" | "hard";
   effort?: number; // RPE 1-10, subjective
   soreness?: string;
   injury?: string;
-  exercises?: { name: string; sets?: number; reps?: number; weightKg?: number }[];
+  exercises?: WorkoutExercise[];
 }
 
 export interface WorkoutSession {
@@ -161,6 +199,10 @@ export interface WorkoutSession {
   googleName?: string; // dataPoint resource name when synced
   overridden?: boolean; // type/name was relabeled locally (Google's value is stale)
   overrideSynced?: boolean; // the relabel was also written back to Google
+  // Set when a live session was finished but deferred from Google (the user said
+  // they also tracked it on their watch). The workouts GET reconciliation links
+  // it to the overlapping watch session once it syncs, then clears this.
+  awaitingWatchMatch?: boolean;
 }
 
 export interface WaterEntry {
@@ -325,6 +367,49 @@ export interface Measurement {
   note?: string;
   syncedToHealth: boolean; // written back to Google Health
   googleName?: string; // dataPoint resource name when synced — provenance key
+}
+
+// ── User profile (foundation for evidence-based targets #10/#11/#13) ─────────
+// Manual-first profile feeding deterministic targets (BMR/TDEE land in a later
+// phase) and BMI / healthy-weight range now. Stored locally in data/profile.json.
+// Today data/userinfo.json holds only the Google name/photo — this is separate,
+// app-owned, and never written back to Google.
+
+export type BiologicalSex = "male" | "female";
+export type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
+export type WeightGoal = "lose" | "maintain" | "gain";
+
+export interface UserProfile {
+  sex: BiologicalSex | null; // biological sex — used only for metabolic estimates
+  birthDate: string | null; // yyyy-MM-dd; age is derived, never stored directly
+  heightCm: number | null;
+  weightKg: number | null; // manual current weight; device weight is preferred when present
+  activityLevel: ActivityLevel | null;
+  goal: WeightGoal | null;
+  targetRateKgPerWeek: number | null; // pace toward goal, magnitude in kg/week
+  pregnantOrLactating: boolean; // conservative-defaults safety flag
+  conditions: string | null; // voluntarily disclosed chronic conditions / limitations, free text
+  updatedAt: string;
+}
+
+export type BmiCategory = "underweight" | "normal" | "overweight" | "obese";
+
+/** Deterministic figures derived from the profile (+ resolved device weight).
+ *  The coach quotes these; it never recomputes BMI or ranges itself. */
+export interface ProfileDerived {
+  age: number | null;
+  weightKgResolved: number | null; // weight used for BMI (device when synced, else manual)
+  weightSource: "device" | "manual" | null;
+  bmi: number | null; // 1-decimal
+  bmiCategory: BmiCategory | null; // CDC adult framing
+  healthyWeightRangeKg: { min: number; max: number } | null; // BMI 18.5–24.9 for this height
+  // Safety-critical fields still missing before precise targets/plans are warranted.
+  missingForTargets: string[];
+}
+
+export interface ProfilePayload {
+  profile: UserProfile;
+  derived: ProfileDerived;
 }
 
 export interface ChatMessage {

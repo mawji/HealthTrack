@@ -160,6 +160,14 @@ export function saveHabitRecords(records: HabitRecord[]) {
   writeJson(RECORDS, records);
 }
 
+export function deleteHabitRecord(id: string): boolean {
+  const records = getHabitRecords();
+  const next = records.filter((r) => r.id !== id);
+  if (next.length === records.length) return false;
+  saveHabitRecords(next);
+  return true;
+}
+
 /** Create or replace the single record for (habitId, date). A null/undefined
  *  value clears any existing record (e.g. un-checking a yes_no habit). */
 export function upsertHabitRecord(input: {

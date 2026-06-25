@@ -5,7 +5,10 @@ import { Sparkline, Bars } from "@/components/Sparkline";
 import { IconChip, DumbbellIcon, FlameIcon, HeartIcon, workoutIcon, workoutLabel } from "@/components/icons";
 import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
-import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
+import TrainingPlan from "@/components/TrainingPlan";
+import LiveSession from "@/components/LiveSession";
+import type { WorkoutExercise } from "@/lib/types";
+import { DEFAULT_QUICK_TYPES, WorkoutType, labelForType } from "@/lib/workout-types";
 import { formatDetail, detailIsEmpty } from "@/lib/workout-detail";
 import { TrendsPayload, WorkoutSession, WorkoutDetail } from "@/lib/types";
 
@@ -39,7 +42,7 @@ export default function Fitness() {
   const [logOpen, setLogOpen] = useState(false);
   const [logType, setLogType] = useState<WorkoutType>(DEFAULT_QUICK_TYPES[2]);
   const [quickTypes, setQuickTypes] = useState<WorkoutType[]>(DEFAULT_QUICK_TYPES);
-  const [logMin, setLogMin] = useState(45);
+  const [logMin, setLogMin] = useState("45"); // raw string so it can be cleared/edited freely
   const [logDate, setLogDate] = useState("");
   const [logTime, setLogTime] = useState("");
   const [logNotes, setLogNotes] = useState("");
@@ -48,6 +51,8 @@ export default function Fitness() {
   const [editing, setEditing] = useState<string | null>(null);
   // Draft detail for the session currently being edited in the history list.
   const [detailDraft, setDetailDraft] = useState<WorkoutDetail>({});
+  // Pending "start this" request handed from a planned workout to the live session.
+  const [startReq, setStartReq] = useState<{ name: string; exerciseType: string; exercises?: WorkoutExercise[]; planItemId?: string } | null>(null);
 
   const load = (d: number) => {
     setLoading(true);
@@ -77,7 +82,7 @@ export default function Fitness() {
         body: JSON.stringify({
           name: logType.label,
           exerciseType: logType.type,
-          durationMin: logMin,
+          durationMin: Math.max(1, Math.round(Number(logMin) || 45)),
           date: logDate || undefined,
           startTime: logTime || undefined,
           notes: logNotes || undefined,
@@ -106,6 +111,13 @@ export default function Fitness() {
 
   async function removeSession(id: string) {
     await fetch(`/api/workouts?id=${id}`, { method: "DELETE" });
+    load(days);
+  }
+
+  // Resolve a deferred ("awaiting watch match") session: write it to Google now,
+  // or manually merge it with a chosen synced watch session ("these are the same").
+  async function resolveSession(id: string, body: Record<string, unknown>) {
+    await fetch("/api/workouts", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
     load(days);
   }
 
@@ -171,6 +183,19 @@ export default function Fitness() {
             {r.label}
           </button>
         ))}
+      </div>
+
+      <div className="stack" style={{ marginBottom: 16, gap: 16 }}>
+        <LiveSession
+          quickTypes={quickTypes}
+          startFor={startReq}
+          onConsumedStart={() => setStartReq(null)}
+          onFinished={() => load(days)}
+        />
+        <TrainingPlan
+          onChange={() => load(days)}
+          onStart={(it) => setStartReq({ name: it.name, exerciseType: it.exerciseType, exercises: it.exercises, planItemId: it.id })}
+        />
       </div>
 
       <div className="stack desk-grid">
@@ -299,7 +324,7 @@ export default function Fitness() {
           <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             <label style={{ flex: "1 1 80px" }}>
               <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase" }}>min</span>
-              <input className="field" type="number" min={1} value={logMin} onChange={(e) => setLogMin(Number(e.target.value))} style={{ padding: "8px 10px", marginTop: 3 }} />
+              <input className="field" type="number" min={1} inputMode="numeric" value={logMin} onChange={(e) => setLogMin(e.target.value)} onBlur={() => setLogMin((s) => (s.trim() === "" ? "45" : String(Math.max(1, Math.round(Number(s) || 45)))))} style={{ padding: "8px 10px", marginTop: 3 }} />
             </label>
             <label style={{ flex: "2 1 130px" }}>
               <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase" }}>date</span>
@@ -395,6 +420,24 @@ export default function Fitness() {
                             )}
                           </div>
                         </div>
+                        {w.awaitingWatchMatch && (() => {
+                          const candidates = byDay.get(date)!.filter((s) => s.googleName && s.id !== w.id);
+                          return (
+                            <div style={{ marginTop: 10, padding: "9px 11px", borderRadius: 10, background: "var(--bg-inset)", borderLeft: "3px solid var(--activity)" }}>
+                              <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Logged here — waiting to merge with your watch’s session so it isn’t counted twice.</p>
+                              <div className="row" style={{ gap: 8, marginTop: 7, flexWrap: "wrap" }}>
+                                {candidates.map((c) => (
+                                  <button key={c.id} className="btn btn-ghost" style={{ padding: "5px 11px", fontSize: 12 }} onClick={() => resolveSession(w.id, { action: "linkGoogle", googleName: c.googleName, calories: c.calories, avgHr: c.avgHr })}>
+                                    Merge with {c.startTime} {labelForType(c.exerciseType)}
+                                  </button>
+                                ))}
+                                <button className="btn btn-ghost" style={{ padding: "5px 11px", fontSize: 12 }} onClick={() => resolveSession(w.id, { action: "pushToGoogle" })}>
+                                  Save to Google now
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {editing === w.id && (
                           <div style={{ marginTop: 12, borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
                             <p style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 8 }}>

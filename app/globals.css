@@ -435,7 +435,7 @@ nav.bottom-nav {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 2px;
+  gap: 1px;
   background: var(--nav-bg);
   backdrop-filter: blur(14px);
   border: 1px solid var(--hairline);
@@ -443,6 +443,10 @@ nav.bottom-nav {
   padding: 6px;
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
   z-index: 50;
+  /* Never exceed the viewport: the 6-item bar must clear a vertical scrollbar
+     on long pages (e.g. Trends) and fit narrow phones without clipping. */
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
 }
 nav.bottom-nav a {
   display: flex;
@@ -456,8 +460,8 @@ nav.bottom-nav a {
   font-weight: 600;
   letter-spacing: 0.03em;
   /* wide enough that the active pill reads as a circle, not an oval */
-  padding: 7px 12px;
-  min-width: 56px;
+  padding: 7px 9px;
+  min-width: 50px;
   border-radius: 999px;
   transition: background 0.25s, color 0.25s;
 }

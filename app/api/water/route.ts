@@ -33,9 +33,44 @@ async function total(date = localDateStr()): Promise<{ ml: number; glasses: numb
   return { ml, glasses: Math.round(ml / GLASS_ML), synced: false };
 }
 
+/** Per-day water totals from the local log (app-logged), newest first. */
+function historyByDay(): { date: string; ml: number; glasses: number; lastAt: string }[] {
+  const all = readJson<WaterEntry[]>(FILE, []);
+  const byDay = new Map<string, { ml: number; lastAt: string }>();
+  for (const e of all) {
+    const d = localDateStr(new Date(e.at));
+    const cur = byDay.get(d) ?? { ml: 0, lastAt: e.at };
+    cur.ml += e.ml;
+    if (e.at > cur.lastAt) cur.lastAt = e.at;
+    byDay.set(d, cur);
+  }
+  return [...byDay.entries()]
+    .map(([date, v]) => ({ date, ml: v.ml, glasses: Math.round(v.ml / GLASS_ML), lastAt: v.lastAt }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 export async function GET(req: NextRequest) {
+  if (req.nextUrl.searchParams.get("history")) {
+    return NextResponse.json({ days: historyByDay() });
+  }
   const date = req.nextUrl.searchParams.get("date") || undefined;
   return NextResponse.json(await total(date));
+}
+
+/** DELETE ?date=yyyy-MM-dd → clear that day's app-logged water (and the synced
+ *  Google copies). Water logged by other apps isn't touched. */
+export async function DELETE(req: NextRequest) {
+  const date = req.nextUrl.searchParams.get("date");
+  if (!date) return NextResponse.json({ error: "missing date" }, { status: 400 });
+  const all = readJson<WaterEntry[]>(FILE, []);
+  const keep: WaterEntry[] = [];
+  const remove: WaterEntry[] = [];
+  for (const e of all) (localDateStr(new Date(e.at)) === date ? remove : keep).push(e);
+  for (const e of remove) {
+    if (e.googleName && isConnected()) await deleteDataPoint("hydration-log", e.googleName).catch(() => {});
+  }
+  writeJson(FILE, keep);
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(req: NextRequest) {

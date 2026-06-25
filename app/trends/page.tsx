@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Sparkline } from "@/components/Sparkline";
 import { InsightView } from "@/components/InsightView";
 import { CoachInsight, DaySummary, GoalDefinition, GoalProgress, Measurement, MeasurementKind, MedicalRecord, TrendsPayload, TrendPoint } from "@/lib/types";
+import { NutritionTargets, TargetsUnavailable } from "@/lib/coach/nutrition-targets";
 
 // Device-goal metricKey → the Trends series it overlays.
 const GOAL_SERIES: Record<string, SeriesKey> = {
@@ -231,6 +232,7 @@ export default function Trends() {
   const [goalsData, setGoalsData] = useState<{ goals: GoalDefinition[]; progress: GoalProgress[] }>({ goals: [], progress: [] });
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const [targets, setTargets] = useState<NutritionTargets | TargetsUnavailable | null>(null);
 
   // Reused coach insight system (headline/body/viz/focusAreas) per range.
   const [weekData, setWeekData] = useState<DaySummary[]>([]);
@@ -263,6 +265,10 @@ export default function Trends() {
     fetch("/api/records")
       .then((r) => r.json())
       .then((d) => setRecords(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    fetch("/api/nutrition/targets")
+      .then((r) => r.json())
+      .then(setTargets)
       .catch(() => {});
   }, []);
 
@@ -298,8 +304,21 @@ export default function Trends() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
 
-  // Device-goal overlays for the base cards (steps/RHR/weight/sleep).
+  // Device-goal overlays for the base cards (steps/RHR/weight/sleep), plus a
+  // deterministic calorie-target band on the "calories in" card from the
+  // nutrition-targets engine (only when the profile is complete enough).
   const goalOverlays = buildGoalOverlays(goalsData.goals, goalsData.progress);
+  const overlays =
+    targets?.ok && !goalOverlays.caloriesIn
+      ? {
+          ...goalOverlays,
+          caloriesIn: {
+            label: `target ~${targets.calorieTarget.toLocaleString()} kcal`,
+            band: [targets.calorieBand.min, targets.calorieBand.max] as [number, number],
+            statusColor: "var(--food)",
+          },
+        }
+      : goalOverlays;
 
   return (
     <main className="page wide">
@@ -377,7 +396,7 @@ export default function Trends() {
                     lowerBetter={c.lowerBetter}
                     mode={c.mode}
                     weekly={c.weekly}
-                    goal={goalOverlays[c.key]}
+                    goal={overlays[c.key]}
                   />
                 ))}
               </Fragment>

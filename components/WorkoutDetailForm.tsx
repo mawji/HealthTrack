@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { WorkoutDetail } from "@/lib/types";
 import { INTENSITIES } from "@/lib/workout-detail";
-
-type Exercise = NonNullable<WorkoutDetail["exercises"]>[number];
+import ExerciseListEditor from "@/components/ExerciseListEditor";
 
 /** Controlled capture form for the app-local structured workout detail
  *  (intensity, RPE, soreness, injury, exercises). Shared by the Daily quick-log
@@ -22,24 +20,11 @@ export function WorkoutDetailForm({
   accentSoft?: string;
 }) {
   const exercises = value.exercises ?? [];
-  const [showExercises, setShowExercises] = useState(exercises.length > 0);
-
   const set = (patch: Partial<WorkoutDetail>) => onChange({ ...value, ...patch });
-
-  const setExercise = (i: number, patch: Partial<Exercise>) => {
-    const next = exercises.map((ex, j) => (j === i ? { ...ex, ...patch } : ex));
-    set({ exercises: next });
-  };
-  const addExercise = () => set({ exercises: [...exercises, { name: "" }] });
-  const removeExercise = (i: number) => {
-    const next = exercises.filter((_, j) => j !== i);
-    set({ exercises: next.length ? next : undefined });
-  };
 
   const label = (t: string) => (
     <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase" }}>{t}</span>
   );
-  const numCell = { width: 56, padding: "7px 8px", textAlign: "center" as const };
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -122,70 +107,12 @@ export function WorkoutDetailForm({
         </label>
       </div>
 
-      {/* Exercises */}
-      {!showExercises ? (
-        <button
-          onClick={() => { setShowExercises(true); if (exercises.length === 0) addExercise(); }}
-          style={{ background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12.5, textAlign: "left", padding: 0 }}
-        >
-          + Add exercises
-        </button>
-      ) : (
-        <div className="stack" style={{ gap: 8 }}>
-          {label("exercises")}
-          {exercises.map((ex, i) => (
-            <div key={i} className="row" style={{ gap: 6, alignItems: "center" }}>
-              <input
-                className="field"
-                placeholder="Exercise"
-                value={ex.name}
-                onChange={(e) => setExercise(i, { name: e.target.value })}
-                style={{ flex: "1 1 90px", minWidth: 0, padding: "7px 9px" }}
-              />
-              <input
-                className="field"
-                type="number"
-                min={0}
-                placeholder="sets"
-                value={ex.sets ?? ""}
-                onChange={(e) => setExercise(i, { sets: e.target.value ? Number(e.target.value) : undefined })}
-                style={numCell}
-              />
-              <input
-                className="field"
-                type="number"
-                min={0}
-                placeholder="reps"
-                value={ex.reps ?? ""}
-                onChange={(e) => setExercise(i, { reps: e.target.value ? Number(e.target.value) : undefined })}
-                style={numCell}
-              />
-              <input
-                className="field"
-                type="number"
-                min={0}
-                placeholder="kg"
-                value={ex.weightKg ?? ""}
-                onChange={(e) => setExercise(i, { weightKg: e.target.value ? Number(e.target.value) : undefined })}
-                style={numCell}
-              />
-              <button
-                onClick={() => removeExercise(i)}
-                aria-label="remove exercise"
-                style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 14, flex: "none" }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          <button
-            onClick={addExercise}
-            style={{ background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12.5, textAlign: "left", padding: 0 }}
-          >
-            + Add exercise
-          </button>
-        </div>
-      )}
+      {/* Exercises (shared editor: wger/custom picker + per-set + image zoom) */}
+      <ExerciseListEditor
+        exercises={exercises}
+        onChange={(next) => set({ exercises: next.length ? next : undefined })}
+        accent={accent}
+      />
     </div>
   );
 }

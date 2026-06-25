@@ -20,6 +20,11 @@ function guessMealType(d: Date): MealType {
 }
 import { IconChip, ForkIcon } from "@/components/icons";
 import Toast from "@/components/Toast";
+import BarcodeScanner from "@/components/BarcodeScanner";
+import FoodSearch, { FoodCandidate } from "@/components/FoodSearch";
+import ProvenanceBadge from "@/components/ProvenanceBadge";
+
+type Per100g = { calories: number; proteinG: number; carbsG: number; fatG: number };
 
 export default function Food() {
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -38,6 +43,14 @@ export default function Food() {
   const [logTime, setLogTime] = useState("");
   const [note, setNote] = useState("");
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  // Barcode scanning (Open Food Facts). per100g/servingG drive the serving
+  // rescale; the portion stays an editable estimate, only the macro density is
+  // source-backed.
+  const [scanning, setScanning] = useState(false);
+  const [searchingFood, setSearchingFood] = useState(false);
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
+  const [per100g, setPer100g] = useState<Per100g | null>(null);
+  const [servingG, setServingG] = useState<number | null>(null);
 
   const loadLog = () =>
     fetch("/api/food/log")
@@ -76,6 +89,8 @@ export default function Food() {
       const fellBackTo = res.headers.get("X-AI-Fallback");
       if (fellBackTo) setFallbackNote(`Primary model unavailable — using ${fellBackTo}.`);
       setAnalysis(json);
+      setPer100g(null);
+      setServingG(null);
       const now = new Date();
       setMeal(guessMealType(now));
       setLogDate(localDayKey(now.toISOString()));
@@ -85,6 +100,71 @@ export default function Food() {
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  /** Fill the composer from a source-backed result (barcode or USDA). The macro
+   *  density is source-backed; the serving stays editable and rescales. */
+  function applyResolved(r: { analysis: FoodAnalysis; per100g: Per100g | null; servingG: number | null }) {
+    setError("");
+    setAnalysis(r.analysis);
+    setPer100g(r.per100g ?? null);
+    // Default the editable serving to the source serving, else 100 g.
+    setServingG(r.per100g ? r.servingG ?? 100 : null);
+    setPreview(null);
+    const now = new Date();
+    setMeal(guessMealType(now));
+    setLogDate(localDayKey(now.toISOString()));
+    setLogTime(now.toTimeString().slice(0, 5));
+  }
+
+  async function handleBarcode(code: string) {
+    setScanning(false);
+    setError("");
+    setAnalysis(null);
+    setBarcodeBusy(true);
+    try {
+      const res = await fetch(`/api/food/barcode?code=${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message ?? json.error ?? "Lookup failed");
+      applyResolved(json);
+    } catch (e: any) {
+      setError(String(e.message ?? e));
+    } finally {
+      setBarcodeBusy(false);
+    }
+  }
+
+  function handleFoodPick(c: FoodCandidate) {
+    setSearchingFood(false);
+    setAnalysis(null);
+    applyResolved(c);
+  }
+
+  /** Rescale barcode macros to a user-confirmed serving in grams. */
+  function setServing(grams: number) {
+    setServingG(grams);
+    if (!per100g || !analysis) return;
+    const f = grams / 100;
+    const carbsG = Math.round(per100g.carbsG * f * 10) / 10;
+    const gi = analysis.provenance?.gi;
+    setAnalysis({
+      ...analysis,
+      calories: Math.round(per100g.calories * f),
+      proteinG: Math.round(per100g.proteinG * f * 10) / 10,
+      carbsG,
+      fatG: Math.round(per100g.fatG * f * 10) / 10,
+      // Keep source-backed GL in step with the portion's carbs.
+      glycemicLoad: gi != null ? Math.round((gi * carbsG) / 100) : analysis.glycemicLoad,
+      provenance: analysis.provenance ? { ...analysis.provenance, servingG: grams } : analysis.provenance,
+    });
+  }
+
+  function resetComposer() {
+    setAnalysis(null);
+    setPreview(null);
+    setNote("");
+    setPer100g(null);
+    setServingG(null);
   }
 
   async function saveEntry() {
@@ -100,9 +180,7 @@ export default function Food() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...analysis, photo, mealType: meal, loggedAt }),
       });
-      setAnalysis(null);
-      setPreview(null);
-      setNote("");
+      resetComposer();
       await loadLog();
     } finally {
       setSaving(false);
@@ -146,10 +224,13 @@ export default function Food() {
   return (
     <main className="page">
       <Toast message={fallbackNote} onDone={() => setFallbackNote(null)} tone="warn" />
+      {scanning && <BarcodeScanner onResult={handleBarcode} onClose={() => setScanning(false)} />}
+      {searchingFood && <FoodSearch onPick={handleFoodPick} onClose={() => setSearchingFood(false)} />}
       <header className="rise rise-1" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Food.</h1>
         <p className="page-sub">
-          Photograph a meal — AI estimates calories, macros and glycemic load, then logs it back to Google Health.
+          Photograph a meal or scan a barcode — AI estimates calories and macros (packaged foods come straight from
+          the label via Open Food Facts), then logs it back to Google Health.
         </p>
       </header>
 
@@ -171,12 +252,18 @@ export default function Food() {
               <circle cx="12" cy="13.5" r="3.5" />
             </svg>
             <p style={{ fontWeight: 600, color: "var(--food)" }}>Add a food photo</p>
-            <div className="row" style={{ gap: 10, marginTop: 14, justifyContent: "center" }}>
+            <div className="row" style={{ gap: 10, marginTop: 14, justifyContent: "center", flexWrap: "wrap" }}>
               <button className="btn" style={{ background: "var(--food)", padding: "10px 18px", fontSize: 13.5 }} onClick={() => cameraRef.current?.click()}>
                 Camera
               </button>
               <button className="btn btn-ghost" style={{ padding: "10px 18px", fontSize: 13.5 }} onClick={() => galleryRef.current?.click()}>
                 Gallery
+              </button>
+              <button className="btn btn-ghost" style={{ padding: "10px 18px", fontSize: 13.5 }} onClick={() => { setError(""); setScanning(true); }}>
+                Scan barcode
+              </button>
+              <button className="btn btn-ghost" style={{ padding: "10px 18px", fontSize: 13.5 }} onClick={() => { setError(""); setSearchingFood(true); }}>
+                Search foods
               </button>
             </div>
             <p style={{ fontSize: 11, color: "var(--ink-faint)", textTransform: "uppercase", letterSpacing: "0.07em", margin: "18px 0 10px" }}>
@@ -229,6 +316,7 @@ export default function Food() {
         )}
 
         {analyzing && <p className="pulsing" style={{ marginTop: 14, color: "var(--food)", fontWeight: 600 }}>Reading your plate…</p>}
+        {barcodeBusy && <p className="pulsing" style={{ marginTop: 14, color: "var(--food)", fontWeight: 600 }}>Looking up product…</p>}
         {error && <p style={{ marginTop: 12, color: "var(--heart)", fontSize: 13.5 }}>{error}</p>}
 
         {analysis && (
@@ -260,6 +348,40 @@ export default function Food() {
                 <input className="field" type="time" value={logTime} style={{ padding: "8px 10px", marginTop: 3 }} onChange={(e) => setLogTime(e.target.value)} />
               </PickerField>
             </div>
+            {per100g && (
+              <div style={{ marginTop: 12 }}>
+                <PickerField label="Serving (g) — adjust to what you ate">
+                  <input
+                    className="field"
+                    type="number"
+                    inputMode="decimal"
+                    value={servingG ?? 100}
+                    style={{ padding: "8px 10px", marginTop: 3 }}
+                    onChange={(e) => setServing(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </PickerField>
+              </div>
+            )}
+            {analysis.provenance && (
+              <div style={{ marginTop: 10 }}>
+                <ProvenanceBadge provenance={analysis.provenance} confidence={analysis.confidence} showAttribution />
+                {analysis.provenance.allergens && analysis.provenance.allergens.length > 0 && (
+                  <p style={{ fontSize: 11.5, color: "var(--heart)", marginTop: 6 }}>
+                    Contains: {analysis.provenance.allergens.join(", ")}
+                  </p>
+                )}
+                {analysis.provenance.ingredients && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ fontSize: 11.5, color: "var(--ink-soft)", cursor: "pointer", fontWeight: 600 }}>
+                      Ingredients
+                    </summary>
+                    <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.5 }}>
+                      {analysis.provenance.ingredients}
+                    </p>
+                  </details>
+                )}
+              </div>
+            )}
             <p style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 8 }}>
               {analysis.notes} <em>({analysis.confidence} confidence — adjust if needed)</em>
             </p>
@@ -267,7 +389,7 @@ export default function Food() {
               <button className="btn" style={{ flex: 1, background: "var(--food)" }} onClick={saveEntry} disabled={saving}>
                 {saving ? "Logging…" : "Log meal"}
               </button>
-              <button className="btn btn-ghost" onClick={() => { setAnalysis(null); setPreview(null); setNote(""); }}>
+              <button className="btn btn-ghost" onClick={resetComposer}>
                 Discard
               </button>
             </div>
@@ -454,6 +576,17 @@ function LocalMealCard({
               {f.glycemicLoad != null && ` · GL ${f.glycemicLoad}`}
               {f.syncedToHealth && " · ✓ synced"}
             </p>
+            {f.provenance && (
+              <div style={{ marginTop: 5 }}>
+                <ProvenanceBadge provenance={f.provenance} confidence={f.confidence} />
+                {f.provenance.ingredients && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ fontSize: 11, color: "var(--ink-faint)", cursor: "pointer" }}>Ingredients</summary>
+                    <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.5 }}>{f.provenance.ingredients}</p>
+                  </details>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="row" style={{ gap: 8, flex: "none" }}>

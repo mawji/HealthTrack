@@ -58,6 +58,12 @@ export async function POST(req: NextRequest) {
       { vision: hasImage }
     );
     const analysis = parseJsonReply<FoodAnalysis>(reply);
+    // Label the model estimate honestly as the fallback path (vs barcode/USDA),
+    // so the composer shows an "AI estimate" provenance badge.
+    analysis.provenance = {
+      source: hasImage ? "photo" : "text",
+      sourceLabel: "AI estimate",
+    };
     return NextResponse.json(analysis, usedSecondary ? { headers: { "X-AI-Fallback": servedLabel } } : undefined);
   } catch (e: any) {
     console.error("Food analysis failed:", e);

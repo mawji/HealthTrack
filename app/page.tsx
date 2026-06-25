@@ -24,6 +24,7 @@ import {
 } from "@/components/icons";
 import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
+import type { WorkoutPlanItem } from "@/lib/training-plan";
 import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
 import { detailIsEmpty, formatDetail } from "@/lib/workout-detail";
 import {
@@ -78,10 +79,12 @@ export default function Daily() {
   const [water, setWater] = useState<{ ml: number; glasses: number } | null>(null);
   const [waterBusy, setWaterBusy] = useState(false);
   const [workouts, setWorkouts] = useState<WorkoutSession[]>([]);
+  const [nextPlan, setNextPlan] = useState<WorkoutPlanItem | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logType, setLogType] = useState<WorkoutType>(DEFAULT_QUICK_TYPES[2]);
   const [quickTypes, setQuickTypes] = useState<WorkoutType[]>(DEFAULT_QUICK_TYPES);
-  const [logMin, setLogMin] = useState(45);
+  const [logMin, setLogMin] = useState("45"); // raw string so it can be cleared/edited freely
   const [logNotes, setLogNotes] = useState("");
   const [logDetail, setLogDetail] = useState<WorkoutDetail>({});
   const [showDetail, setShowDetail] = useState(false);
@@ -139,6 +142,7 @@ export default function Daily() {
       })
       .catch(() => setErr("Could not load health data."));
     loadWorkouts();
+    loadPlan();
     fetch("/api/goals").then((r) => r.json()).then(setGoalsData).catch(() => {});
   }, []);
 
@@ -242,6 +246,33 @@ export default function Daily() {
     }
   }
 
+  /** Soonest planned workout dated today or tomorrow, for the Daily card. */
+  const loadPlan = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    const tmrw = t.toISOString().slice(0, 10);
+    fetch("/api/workout-plans?upcoming=1")
+      .then((r) => r.json())
+      .then((j) => {
+        const list: WorkoutPlanItem[] = j.items ?? [];
+        setNextPlan(list.find((p) => p.date === today) ?? list.find((p) => p.date === tmrw) ?? null);
+      })
+      .catch(() => {});
+  };
+
+  async function completeNextPlan() {
+    if (!nextPlan) return;
+    setPlanBusy(true);
+    try {
+      await fetch(`/api/workout-plans?id=${nextPlan.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "complete" }) });
+      loadPlan();
+      await loadWorkouts();
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
   const loadWorkouts = () =>
     fetch("/api/workouts?days=7")
       .then((r) => r.json())
@@ -300,7 +331,7 @@ export default function Daily() {
         body: JSON.stringify({
           name: logType.label,
           exerciseType: logType.type,
-          durationMin: logMin,
+          durationMin: Math.max(1, Math.round(Number(logMin) || 45)),
           notes: logNotes || undefined,
           detail: detailIsEmpty(logDetail) ? undefined : logDetail,
         }),
@@ -545,6 +576,31 @@ export default function Daily() {
           </div>
         </section>
 
+        {/* Next planned workout (today / tomorrow) */}
+        {nextPlan && (
+          <section className="card rise rise-3" style={{ borderLeft: "3px solid var(--activity)" }}>
+            <div className="row" style={{ justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                <IconChip icon={workoutIcon(nextPlan.exerciseType)} color="var(--activity)" size={30} />
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--activity)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    {nextPlan.date === new Date().toISOString().slice(0, 10) ? "Planned today" : "Planned tomorrow"}
+                  </span>
+                  <strong style={{ fontSize: 15, display: "block" }}>{nextPlan.name}</strong>
+                  <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                    {nextPlan.durationMin} min{nextPlan.intensity ? ` · ${nextPlan.intensity}` : ""}
+                    {nextPlan.exercises?.length ? ` · ${nextPlan.exercises.length} exercise${nextPlan.exercises.length > 1 ? "s" : ""}` : ""}
+                    {nextPlan.estCalories ? ` · ~${nextPlan.estCalories} kcal` : ""}
+                  </p>
+                </div>
+              </div>
+              <button className="btn" style={{ background: "var(--activity)", padding: "8px 16px", fontSize: 13, flex: "none", alignSelf: "center" }} disabled={planBusy} onClick={completeNextPlan}>
+                {planBusy ? "…" : "Complete"}
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* Activity / workouts */}
         <section className="card rise rise-3">
           <div className="row" style={{ justifyContent: "space-between" }}>
@@ -643,7 +699,9 @@ export default function Daily() {
                   type="number"
                   value={logMin}
                   min={1}
-                  onChange={(e) => setLogMin(Number(e.target.value))}
+                  inputMode="numeric"
+                  onChange={(e) => setLogMin(e.target.value)}
+                  onBlur={() => setLogMin((s) => (s.trim() === "" ? "45" : String(Math.max(1, Math.round(Number(s) || 45)))))}
                   style={{ width: 90, padding: "8px 10px" }}
                 />
                 <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>min</span>

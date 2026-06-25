@@ -2,12 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { readJson, writeJson, newId } from "@/lib/store";
 import { isConnected, logFoodToGoogleHealth } from "@/lib/googlehealth";
 import { getRemoteMeals } from "@/lib/remote-food";
-import { FoodEntry, MealType } from "@/lib/types";
+import { FoodEntry, FoodProvenance, MealType, NutritionSource } from "@/lib/types";
 
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "other"];
+const NUTRITION_SOURCES: NutritionSource[] = ["photo", "text", "barcode", "fdc", "label", "user", "model"];
 
 function parseMealType(v: unknown): MealType | undefined {
   return MEAL_TYPES.includes(v as MealType) ? (v as MealType) : undefined;
+}
+
+/** Keep only well-formed provenance from the client (it's display-only metadata,
+ *  but we still bound the strings and validate the source enum). */
+function parseProvenance(v: unknown): FoodProvenance | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const p = v as Record<string, unknown>;
+  if (!NUTRITION_SOURCES.includes(p.source as NutritionSource)) return undefined;
+  const str = (x: unknown, max: number) => (typeof x === "string" && x.trim() ? x.trim().slice(0, max) : undefined);
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : undefined);
+  const out: FoodProvenance = { source: p.source as NutritionSource };
+  out.sourceLabel = str(p.sourceLabel, 80);
+  out.sourceUrl = str(p.sourceUrl, 300);
+  out.attribution = str(p.attribution, 120);
+  out.barcode = str(p.barcode, 20);
+  out.brand = str(p.brand, 80);
+  out.servingG = n(p.servingG);
+  out.portionEstimated = typeof p.portionEstimated === "boolean" ? p.portionEstimated : undefined;
+  out.gi = n(p.gi);
+  out.giSource = str(p.giSource, 80);
+  out.nova = n(p.nova);
+  out.ingredients = str(p.ingredients, 600);
+  out.allergens = Array.isArray(p.allergens)
+    ? p.allergens.filter((a): a is string => typeof a === "string").slice(0, 20)
+    : undefined;
+  return out;
 }
 
 /** Client-chosen timestamp, clamped to valid dates; falls back to now. */
@@ -42,6 +69,7 @@ export async function POST(req: NextRequest) {
     confidence: body.confidence ?? "medium",
     notes: body.notes,
     photo,
+    provenance: parseProvenance(body.provenance),
     syncedToHealth: false,
   };
 

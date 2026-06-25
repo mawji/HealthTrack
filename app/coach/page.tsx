@@ -68,6 +68,7 @@ const executedActions = new Set<string>();
 function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: string }) {
   const [status, setStatus] = useState<"running" | "done" | "failed">("running");
   const [detail, setDetail] = useState("");
+  const [isPlan, setIsPlan] = useState(false);
 
   useEffect(() => {
     const sig = `${msgKey}:${raw}`;
@@ -148,6 +149,19 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
               (status?.completed ? " · on track" : "") +
               (status?.streak ? ` · streak ${status.streak}d` : "")
           );
+        } else if (spec.action === "planWorkout") {
+          setIsPlan(true);
+          const res = await fetch("/api/workout-plans", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(spec),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const saved = await res.json();
+          setDetail(
+            `${saved.name} · ${saved.date} · ${saved.durationMin} min` +
+              (saved.estCalories ? ` · ~${saved.estCalories} kcal (est.)` : "")
+          );
         } else {
           throw new Error(`unknown action ${spec.action}`);
         }
@@ -178,7 +192,11 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
         {status === "running" ? "…" : status === "done" ? "✓" : "✕"}
       </span>
       <span style={{ color: "var(--ink-soft)" }}>
-        {status === "running" ? "Logging…" : status === "done" ? `Logged — ${detail}` : `Couldn't log: ${detail}`}
+        {status === "running"
+          ? isPlan ? "Planning…" : "Logging…"
+          : status === "done"
+            ? `${isPlan ? "Planned" : "Logged"} — ${detail}`
+            : `Couldn't ${isPlan ? "plan" : "log"}: ${detail}`}
       </span>
     </div>
   );

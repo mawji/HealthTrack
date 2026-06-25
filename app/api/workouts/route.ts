@@ -13,6 +13,7 @@ import { demoWorkouts } from "@/lib/demo";
 import { refreshArchivedDay } from "@/lib/context";
 import { isSettledDate } from "@/lib/archive";
 import { WorkoutSession, WorkoutDetail } from "@/lib/types";
+import { reconcilePlans } from "@/lib/training-plan";
 import { DEFAULT_QUICK_TYPES, labelForType, WorkoutType } from "@/lib/workout-types";
 import { sanitizeDetail } from "@/lib/workout-detail";
 
@@ -54,14 +55,54 @@ function addDays(date: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// ── live-session ↔ watch reconciliation ─────────────────────────────────────
+const RECONCILE_TOL_MS = 30 * 60 * 1000; // start-time drift tolerance
+const GENERIC_TYPES = new Set(["WORKOUT", "OTHER", "AEROBIC_WORKOUT", "CARDIO_WORKOUT", "EXERCISE_CLASS", "OUTDOOR_WORKOUT"]);
+
+function workoutRange(w: WorkoutSession): { s: number; e: number } {
+  const s = Date.parse(`${w.date}T${w.startTime || "00:00"}:00`);
+  return { s, e: s + (w.durationMin || 0) * 60000 };
+}
+
+function sessionsOverlap(a: WorkoutSession, b: WorkoutSession): boolean {
+  if (a.date !== b.date) return false;
+  const typeOk = a.exerciseType === b.exerciseType || GENERIC_TYPES.has(a.exerciseType) || GENERIC_TYPES.has(b.exerciseType);
+  if (!typeOk) return false;
+  const ra = workoutRange(a);
+  const rb = workoutRange(b);
+  if (Number.isNaN(ra.s) || Number.isNaN(rb.s)) return false;
+  return (ra.s < rb.e && rb.s < ra.e) || Math.abs(ra.s - rb.s) <= RECONCILE_TOL_MS;
+}
+
+/** Link app sessions awaiting a watch match to the overlapping watch session:
+ *  adopt its googleName + metrics onto our detail-rich journal entry and claim
+ *  the remote index. Mutates journal entries (shared with the persisted list);
+ *  returns true if anything was adopted. */
+function reconcileJournal(journal: WorkoutSession[], remote: WorkoutSession[], claimed: Set<number>): boolean {
+  let changed = false;
+  for (const j of journal) {
+    if (!j.awaitingWatchMatch || j.googleName) continue;
+    const idx = remote.findIndex((r, i) => !claimed.has(i) && r.googleName && sessionsOverlap(j, r));
+    if (idx === -1) continue;
+    const r = remote[idx];
+    claimed.add(idx);
+    j.googleName = r.googleName;
+    j.syncedToHealth = true;
+    j.awaitingWatchMatch = false;
+    if (j.calories == null) j.calories = r.calories;
+    if (j.avgHr == null) j.avgHr = r.avgHr;
+    changed = true;
+  }
+  return changed;
+}
+
 export async function GET(req: NextRequest) {
   const days = Math.min(Number(req.nextUrl.searchParams.get("days") ?? 7), 31);
   const end = localDateStr();
   const start = addDays(end, -(days - 1));
 
-  const journal = readJson<WorkoutSession[]>(JOURNAL, []).filter(
-    (w) => w.date >= start && w.date <= end
-  );
+  const allJournal = readJson<WorkoutSession[]>(JOURNAL, []);
+  const journal = allJournal.filter((w) => w.date >= start && w.date <= end);
 
   let remote: WorkoutSession[] = [];
   let demo = false;
@@ -76,12 +117,25 @@ export async function GET(req: NextRequest) {
     demo = true;
   }
 
-  // Journal entries that synced come back from the API too — prefer the
-  // journal copy (it has notes) and drop the API duplicate.
+  // Reconcile app-logged sessions (no googleName — e.g. finished in-app and
+  // "also tracked on the watch") against the watch session that later syncs:
+  // match by date + compatible type + overlapping interval (±30 min tolerance
+  // for start drift), then ADOPT the watch session's googleName + metrics onto
+  // our (detail-rich) journal entry so it shows as one workout. Adoptions are
+  // persisted so it's a one-time link per session.
+  const claimed = new Set<number>();
+  if (!demo) {
+    const persisted = reconcileJournal(journal, remote, claimed);
+    if (persisted) writeJson(JOURNAL, allJournal); // journal rows are shared with allJournal by reference
+  }
+
+  // Journal entries that synced come back from the API too — prefer the journal
+  // copy (it has notes/detail) and drop the API duplicate (by googleName or the
+  // overlap match above).
   const journalGoogleNames = new Set(journal.map((w) => w.googleName).filter(Boolean));
   const merged = [
     ...journal,
-    ...remote.filter((w) => !journalGoogleNames.has(w.googleName)),
+    ...remote.filter((w, i) => !claimed.has(i) && !journalGoogleNames.has(w.googleName)),
   ].sort((a, b) => (a.date + a.startTime < b.date + b.startTime ? 1 : -1));
 
   const overrides = readJson<Record<string, WorkoutOverride>>(OVERRIDES, {});
@@ -94,6 +148,10 @@ export async function GET(req: NextRequest) {
       : w;
     return d ? { ...base, detail: d } : base;
   });
+
+  // Auto-complete planned workouts that actually happened (app or watch),
+  // matched by date + compatible type. Uses the post-override types.
+  if (!demo) reconcilePlans(sessions.map((w) => ({ id: w.id, date: w.date, exerciseType: w.exerciseType })));
 
   return NextResponse.json({ demo, range: { start, end }, sessions, quickTypes: computeQuickTypes() });
 }
@@ -123,7 +181,10 @@ export async function POST(req: NextRequest) {
     syncedToHealth: false,
   };
 
-  if (isConnected()) {
+  // skipGoogleSync: set when finishing a live session the user also tracked on
+  // their watch — we hold off writing to Google and let the GET reconciliation
+  // link this journal entry to the watch session once it syncs (no duplicate).
+  if (isConnected() && !body.skipGoogleSync) {
     const start = civilToDate(date, startTime);
     const googleName = await logExerciseToGoogleHealth({
       name: entry.name,
@@ -140,6 +201,10 @@ export async function POST(req: NextRequest) {
     // Backdated workouts can land on an archived (settled) day — keep the
     // local archive in step with what was just written to the API.
     if (isSettledDate(date)) await refreshArchivedDay(date);
+  } else if (isConnected() && body.skipGoogleSync) {
+    // Deferred: the user also tracked this on their watch — flag it so the GET
+    // reconciliation links it to the watch session once that syncs.
+    entry.awaitingWatchMatch = true;
   }
 
   const detail = sanitizeDetail(body.detail);
@@ -164,6 +229,42 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json();
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
+
+  // Manual resolution for a deferred ("awaiting watch match") journal session.
+  if (body.action === "pushToGoogle" || body.action === "linkGoogle") {
+    const journal = readJson<WorkoutSession[]>(JOURNAL, []);
+    const entry = journal.find((w) => w.id === id);
+    if (!entry) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    if (body.action === "pushToGoogle") {
+      // The watch session never came (or it wasn't tracked there) — write ours now.
+      if (isConnected() && !entry.googleName) {
+        const googleName = await logExerciseToGoogleHealth({
+          name: entry.name,
+          exerciseType: entry.exerciseType,
+          start: civilToDate(entry.date, entry.startTime),
+          durationMin: entry.durationMin,
+          calories: entry.calories,
+          notes: entry.notes,
+        });
+        if (googleName !== null) {
+          entry.syncedToHealth = true;
+          entry.googleName = googleName || undefined;
+        }
+        if (isSettledDate(entry.date)) await refreshArchivedDay(entry.date);
+      }
+      entry.awaitingWatchMatch = false;
+    } else {
+      // linkGoogle: manually adopt a chosen watch session ("these are the same").
+      entry.googleName = String(body.googleName ?? "") || entry.googleName;
+      entry.syncedToHealth = true;
+      entry.awaitingWatchMatch = false;
+      if (entry.calories == null && body.calories != null) entry.calories = Math.round(Number(body.calories));
+      if (entry.avgHr == null && body.avgHr != null) entry.avgHr = Math.round(Number(body.avgHr));
+    }
+    writeJson(JOURNAL, journal);
+    return NextResponse.json(entry);
+  }
 
   // Detail edits are independent of type relabels and apply to any session
   // (journal or Google-imported) — they only touch the local detail side-store.

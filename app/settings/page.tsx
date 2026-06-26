@@ -4,6 +4,10 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 import { IconChip, HeartIcon, ScaleIcon, LungsIcon } from "@/components/icons";
 import SharingPanel from "./SharingPanel";
+import ProfilePanel from "./ProfilePanel";
+
+type SettingsTab = "profile" | "integrations" | "ai" | "telegram" | "sharing" | "preferences" | "archive";
+const TAB_KEYS: SettingsTab[] = ["profile", "integrations", "ai", "telegram", "sharing", "preferences", "archive"];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -353,7 +357,22 @@ export default function Settings() {
 
   const s = data?.settings;
 
-  const [activeTab, setActiveTab] = useState<"integrations" | "ai" | "telegram" | "sharing" | "preferences" | "archive">("integrations");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("integrations");
+
+  // Deep-link support: /settings?tab=profile (used by the mobile profile menu
+  // and the redirected /profile route). Read once on mount; keep the URL in
+  // sync so the chosen tab survives a refresh / share.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab") as SettingsTab | null;
+    if (t && TAB_KEYS.includes(t)) setActiveTab(t);
+  }, []);
+
+  const selectTab = (t: SettingsTab) => {
+    setActiveTab(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    window.history.replaceState(null, "", url);
+  };
 
   useEffect(() => {
     if (archive?.backfill) {
@@ -1276,38 +1295,44 @@ export default function Settings() {
           {/* Tab Navigation */}
           <nav className="settings-nav rise rise-2">
             <button
+              className={`settings-tab-btn ${activeTab === "profile" ? "active" : ""}`}
+              onClick={() => selectTab("profile")}
+            >
+              <span>👤</span> Profile
+            </button>
+            <button
               className={`settings-tab-btn ${activeTab === "integrations" ? "active" : ""}`}
-              onClick={() => setActiveTab("integrations")}
+              onClick={() => selectTab("integrations")}
             >
               <span>📡</span> Integrations
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "ai" ? "active" : ""}`}
-              onClick={() => setActiveTab("ai")}
+              onClick={() => selectTab("ai")}
             >
               <span>🧠</span> AI Assistant
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "telegram" ? "active" : ""}`}
-              onClick={() => setActiveTab("telegram")}
+              onClick={() => selectTab("telegram")}
             >
               <span>✈️</span> Telegram
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "sharing" ? "active" : ""}`}
-              onClick={() => setActiveTab("sharing")}
+              onClick={() => selectTab("sharing")}
             >
               <span>🔗</span> Sharing
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "preferences" ? "active" : ""}`}
-              onClick={() => setActiveTab("preferences")}
+              onClick={() => selectTab("preferences")}
             >
               <span>⚙️</span> Preferences
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "archive" ? "active" : ""}`}
-              onClick={() => setActiveTab("archive")}
+              onClick={() => selectTab("archive")}
             >
               <span>📦</span> Data & Storage
             </button>
@@ -1315,6 +1340,7 @@ export default function Settings() {
 
           {/* Tab Content Panel */}
           <div className="settings-content stack">
+            {activeTab === "profile" && <ProfilePanel />}
             {activeTab === "integrations" && renderIntegrations()}
             {activeTab === "ai" && renderAi()}
             {activeTab === "telegram" && renderTelegram()}

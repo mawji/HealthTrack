@@ -122,7 +122,7 @@ export default function AvatarMenu() {
             {/* On desktop these all live in the sidebar, so the menu hides them
                 (mobile keeps them — the bottom bar has no room). */}
             <div className="mobile-only">
-              <MenuLink href="/profile" label="Profile" onClick={() => setOpen(false)} icon={
+              <MenuLink href="/settings?tab=profile" label="Profile" onClick={() => setOpen(false)} icon={
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="8" r="3.6" /><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" />
                 </svg>

@@ -116,6 +116,17 @@ export async function clearButtons(chatId: number, messageId: number): Promise<v
   );
 }
 
+/** Download a file (e.g. a voice note) by its file_id → raw bytes. */
+export async function downloadFile(fileId: string): Promise<Buffer> {
+  const token = getBotToken();
+  if (!token) throw new Error("Telegram bot token not configured");
+  const file = await call("getFile", { file_id: fileId }); // → { file_path }
+  if (!file?.file_path) throw new Error("Telegram getFile returned no path");
+  const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  if (!res.ok) throw new Error(`Telegram file download failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /** Register the slash-command menu shown in the Telegram client. */
 export async function setMyCommands(
   commands: { command: string; description: string }[]

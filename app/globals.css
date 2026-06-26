@@ -253,6 +253,22 @@ main.page {
   flex-direction: column;
   gap: 8px;
 }
+/* Theme toggle in the footer "local · private" row — small, borderless,
+   icon-only so it reads as a subtle utility rather than a nav item. */
+.sidebar .side-foot .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-soft);
+}
+.sidebar .side-foot .icon-btn:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.sidebar .side-foot .icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
 
 /* ── Typography ── */
 h1.page-title {

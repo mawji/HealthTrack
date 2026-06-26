@@ -127,12 +127,48 @@ export async function getDay(date: string): Promise<{ day: DaySummary; demo: boo
   }
 }
 
+// Short-TTL cache for the live day-range fetch. A single coach turn pulls two
+// overlapping windows (14-day context + 45-day readiness), and the proactive
+// scheduler / daily view / sharing each pull their own — without this they all
+// hammer the Google Health API independently and trip its per-minute quota
+// (429s), which both slows the coach (~10s context builds) and degrades the
+// data (429 → archive fallback). The TTL is short enough that staleness is
+// imperceptible in a conversation; a larger cached window also satisfies a
+// smaller request by slicing, so 14 reuses a fresh 45.
+type RangeResult = { days: DaySummary[]; demo: boolean };
+// Stored on globalThis so it survives Next dev HMR module reloads (a plain
+// module-level Map gets wiped on every Fast Refresh, defeating the cache during
+// development). In production it's an ordinary process-lifetime cache.
+const recentCache: Map<number, { at: number; data: RangeResult }> =
+  ((globalThis as any).__htRecentCache ??= new Map());
+const RECENT_TTL_MS = 30_000;
+
+/** Drop the cache — call after a write so the coach reflects a fresh log at once. */
+export function invalidateRecentDays() {
+  recentCache.clear();
+}
+
+export async function getRecentDays(n: number): Promise<RangeResult> {
+  const now = Date.now();
+  const exact = recentCache.get(n);
+  if (exact && now - exact.at < RECENT_TTL_MS) return exact.data;
+  // Satisfy a smaller request from a larger fresh window (e.g. 14 from 45).
+  for (const [m, entry] of recentCache) {
+    if (m > n && now - entry.at < RECENT_TTL_MS && entry.data.days.length >= n) {
+      return { days: entry.data.days.slice(-n), demo: entry.data.demo };
+    }
+  }
+  const data = await getRecentDaysUncached(n);
+  recentCache.set(n, { at: now, data });
+  return data;
+}
+
 /**
  * Last n days, oldest first. Settled days come from the archive; the
  * remainder (recent window + any archive gaps) is fetched live in one go and
  * settled days among them are written back to the archive.
  */
-export async function getRecentDays(n: number): Promise<{ days: DaySummary[]; demo: boolean }> {
+async function getRecentDaysUncached(n: number): Promise<{ days: DaySummary[]; demo: boolean }> {
   if (!isConnected()) return { days: demoRange(n), demo: true };
 
   const end = localDateStr();
@@ -276,7 +312,12 @@ function fmtDay(d: DaySummary): string {
 
 /** Compact plain-text health context for the AI coach system prompt. */
 export async function buildCoachContext(days = 14, query?: string): Promise<{ text: string; demo: boolean }> {
-  const { days: range, demo } = await getRecentDays(days);
+  // Fetch the largest window this build needs ONCE (the readiness baseline is the
+  // widest), then derive the shorter context window by slicing — so the 14-day
+  // context and the 45-day readiness share a single live Google Health fetch
+  // instead of two. getRecentDays caches it, so readinessForDate() below reuses it.
+  const { days: full, demo } = await getRecentDays(Math.max(days, READINESS_WINDOW));
+  const range = full.slice(-days);
 
   // Meals from both sources the coach should reason over: the local food log
   // and meals logged in other apps, synced back from Google Health (which the

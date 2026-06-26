@@ -41,16 +41,6 @@ export default function Sidebar() {
         </Link>
       ))}
       <div className="side-foot">
-        <ThemeToggle variant="sidelink" />
-        <Link href="/profile" className={`side-link ${pathname === "/profile" ? "active" : ""}`}>
-          <span className="side-icon" style={{ background: "color-mix(in srgb, var(--breath) 18%, transparent)", color: "var(--breath)" }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="8" r="3.6" />
-              <path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" />
-            </svg>
-          </span>
-          Profile
-        </Link>
         <Link href="/settings" className={`side-link ${pathname === "/settings" ? "active" : ""}`}>
           <span className="side-icon" style={{ background: "color-mix(in srgb, var(--ink) 9%, transparent)", color: "var(--ink-soft)" }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -62,7 +52,10 @@ export default function Sidebar() {
         </Link>
         <div style={{ padding: "8px 10px 0", borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 6 }}>
           <BatteryIndicator showLabel={true} />
-          <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>local · private</span>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>local · private</span>
+            <ThemeToggle variant="icon" />
+          </div>
         </div>
       </div>
     </aside>

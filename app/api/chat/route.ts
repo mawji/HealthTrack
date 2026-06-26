@@ -15,18 +15,27 @@ export async function POST(req: NextRequest) {
   const { messages } = (await req.json()) as { messages: ChatMessage[] };
   // The latest user message lightly boosts memory relevance ranking.
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content;
+  const tCtx = Date.now();
   const { text: context } = await buildCoachContext(14, lastUser);
+  const ctxMs = Date.now() - tCtx;
 
   const system = `${COACH_PERSONA}\n\nCurrent date: ${localDateStr()}\n\n${context}`;
 
   try {
+    const tProv = Date.now();
     const { stream, usedSecondary, servedLabel } = await streamWithFallback([
       { role: "system", content: system },
       ...messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
     ]);
+    const provMs = Date.now() - tProv;
+    // Timing breakdown so a slow turn can be attributed (context build vs.
+    // provider connect). Visible in the dev terminal and response headers.
+    console.log(`[chat] context build ${ctxMs}ms · provider open ${provMs}ms`);
     const headers: Record<string, string> = {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Accel-Buffering": "no",
+      "X-Context-Ms": String(ctxMs),
+      "X-Provider-Ms": String(provMs),
     };
     if (usedSecondary) headers["X-AI-Fallback"] = servedLabel;
     return new Response(stream, { headers });

@@ -14,8 +14,10 @@ import {
   answerCallback,
   clearButtons,
   escapeHtml,
+  downloadFile,
   InlineButton,
 } from "@/lib/telegram/bot";
+import { transcribe } from "@/lib/transcribe";
 import { appendTurn, getThread, resetThread } from "@/lib/telegram/thread";
 import { formatToday, formatWeek } from "@/lib/telegram/format";
 import { createDraft, takeDraft } from "@/lib/telegram/drafts";
@@ -27,7 +29,8 @@ import { buildDailyReport } from "@/lib/proactive/report";
 // ── Minimal Bot API update shapes (only the fields we read) ──────────────────
 type TgUser = { id: number; username?: string; first_name?: string };
 type TgChat = { id: number };
-type TgMessage = { message_id: number; chat: TgChat; from?: TgUser; text?: string };
+type TgVoice = { file_id: string; duration?: number; mime_type?: string };
+type TgMessage = { message_id: number; chat: TgChat; from?: TgUser; text?: string; voice?: TgVoice; audio?: TgVoice };
 type TgCallback = { id: string; data?: string; from: TgUser; message?: TgMessage };
 export type TgUpdate = { message?: TgMessage; callback_query?: TgCallback };
 
@@ -57,7 +60,28 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
 async function handleMessage(msg: TgMessage): Promise<void> {
   const chatId = msg.chat.id;
   const fromId = msg.from?.id;
-  const text = (msg.text ?? "").trim();
+  let text = (msg.text ?? "").trim();
+
+  // Voice note / audio → transcribe locally (whisper) and treat as the message.
+  // Only paired/allow-listed users reach a transcript that does anything; we
+  // gate below exactly as for text. (We don't transcribe before knowing the
+  // sender to avoid doing work for strangers.)
+  const voice = msg.voice ?? msg.audio;
+  if (!text && voice) {
+    if (authorize(chatId) !== "owner" && (fromId == null || !resolveContact(fromId))) return; // ignore strangers
+    try {
+      const audio = await downloadFile(voice.file_id);
+      const r = await transcribe(audio, "voice.ogg");
+      text = r.text.trim();
+    } catch (e) {
+      console.error("voice transcription failed:", e);
+      return void (await sendMessage(chatId, "⚠ Couldn't transcribe that voice note. Try again, or type it."));
+    }
+    if (!text) return void (await sendMessage(chatId, "🎤 I couldn't make out any words — try again?"));
+    // Echo what was heard so a mis-transcription is visible before it's acted on.
+    await sendMessage(chatId, `🎤 Heard: “${escapeHtml(text)}”`);
+  }
+
   if (!text) return;
 
   // ── Pairing: the ONLY thing an unverified chat may do ──────────────────────

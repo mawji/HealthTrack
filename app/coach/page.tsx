@@ -452,6 +452,11 @@ export default function Coach() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  // Voice input: record → /api/transcribe → drop text into the box for review.
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   // Gate the starter suggestions until we've checked for an open question, so a
   // pending question doesn't flash behind the default suggestions.
   const [questionChecked, setQuestionChecked] = useState(false);
@@ -508,13 +513,18 @@ export default function Coach() {
     return () => { cancelled = true; };
   }, []);
 
-  async function send() {
-    const text = input.trim();
+  function send() {
+    void sendText(input);
+  }
+
+  async function sendText(raw: string) {
+    const text = raw.trim();
     if (!text || streaming) return;
     setInput("");
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages([...next, { role: "assistant", content: "" }]);
     setStreaming(true);
+    const t0 = performance.now();
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -527,15 +537,25 @@ export default function Coach() {
       }
       const fellBackTo = res.headers.get("X-AI-Fallback");
       if (fellBackTo) setFallbackNote(`Primary model unavailable — using ${fellBackTo}.`);
+      // Latency breakdown (open DevTools console). TTFT captures the gpt-5.5
+      // reasoning gap that the server-side stream-open timing can't see.
+      const ctxMs = res.headers.get("X-Context-Ms");
+      const provMs = res.headers.get("X-Provider-Ms");
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let acc = "";
+      let ttft = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
+        if (!ttft && acc.trim()) {
+          ttft = Math.round(performance.now() - t0);
+          console.log(`[coach] context=${ctxMs}ms · provider-open=${provMs}ms · time-to-first-token=${ttft}ms`);
+        }
         setMessages([...next, { role: "assistant", content: acc }]);
       }
+      console.log(`[coach] total=${Math.round(performance.now() - t0)}ms`);
       // Persist the conversation (verbatim, incl. viz/log fences) so it can be
       // revisited or continued later. Save once the exchange is complete.
       persist([...next, { role: "assistant", content: acc }]);
@@ -544,6 +564,48 @@ export default function Coach() {
     } finally {
       setStreaming(false);
     }
+  }
+
+  // Hold-to-speak: press the mic to record, release to stop → transcribe →
+  // send. (Press-and-hold rather than tap-toggle, like a walkie-talkie.)
+  async function startRecording() {
+    if (transcribing || streaming || recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        if (blob.size < 1200) return; // a too-short tap — ignore, nothing said
+        setTranscribing(true);
+        try {
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": blob.type },
+            body: blob,
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "Transcription failed");
+          if (json.text) await sendText(json.text); // send on release
+        } catch (e: any) {
+          setFallbackNote(`Voice: ${e.message ?? e}`);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+    } catch {
+      setFallbackNote("Microphone unavailable — check browser permissions.");
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
   }
 
   async function persist(msgs: ChatMessage[]) {
@@ -698,11 +760,42 @@ export default function Coach() {
         <div className="row" style={{ gap: 8, marginTop: 14 }}>
           <input
             className="field"
-            placeholder="Ask about your health…"
+            placeholder={transcribing ? "Transcribing…" : recording ? "Listening — tap mic to stop" : "Ask about your health…"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
+            disabled={recording || transcribing}
           />
+          <button
+            className="btn"
+            aria-label="Hold to speak"
+            title="Hold to speak (on-device transcription)"
+            onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); startRecording(); }}
+            onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); stopRecording(); }}
+            onContextMenu={(e) => e.preventDefault()}
+            disabled={transcribing || streaming}
+            style={{
+              flex: "none",
+              padding: "12px 14px",
+              background: recording ? "var(--heart)" : "var(--bg-inset)",
+              color: recording ? "white" : "var(--ink-soft)",
+              border: "1px solid var(--hairline)",
+              touchAction: "none",
+              transform: recording ? "scale(1.06)" : "none",
+              transition: "transform 0.12s ease, background 0.12s ease",
+            }}
+          >
+            {transcribing ? (
+              <span className="pulsing" style={{ fontSize: 16, lineHeight: 1 }}>•••</span>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+                <line x1="12" y1="18" x2="12" y2="21" />
+                <line x1="8.5" y1="21" x2="15.5" y2="21" />
+              </svg>
+            )}
+          </button>
           <button className="btn" style={{ background: "var(--breath)", flex: "none", padding: "12px 18px" }} onClick={send} disabled={streaming || !input.trim()}>
             ↑
           </button>

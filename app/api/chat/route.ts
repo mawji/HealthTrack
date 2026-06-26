@@ -13,7 +13,9 @@ export async function POST(req: NextRequest) {
     );
   }
   const { messages } = (await req.json()) as { messages: ChatMessage[] };
-  const { text: context } = await buildCoachContext(14);
+  // The latest user message lightly boosts memory relevance ranking.
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content;
+  const { text: context } = await buildCoachContext(14, lastUser);
 
   const system = `${COACH_PERSONA}\n\nCurrent date: ${localDateStr()}\n\n${context}`;
 

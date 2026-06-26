@@ -7,6 +7,7 @@ import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
 import TrainingPlan from "@/components/TrainingPlan";
 import LiveSession from "@/components/LiveSession";
+import ExerciseSnacks from "@/components/ExerciseSnacks";
 import type { WorkoutExercise } from "@/lib/types";
 import { DEFAULT_QUICK_TYPES, WorkoutType, labelForType } from "@/lib/workout-types";
 import { formatDetail, detailIsEmpty } from "@/lib/workout-detail";
@@ -186,6 +187,7 @@ export default function Fitness() {
       </div>
 
       <div className="stack" style={{ marginBottom: 16, gap: 16 }}>
+        <ExerciseSnacks />
         <LiveSession
           quickTypes={quickTypes}
           startFor={startReq}

@@ -921,6 +921,25 @@ select.field:focus {
   color: var(--ink);
 }
 
+/* Native <select>/<input type=time> sitting inside a .pref-card. Constrain the
+   width so the browser's dropdown/clock chevron stays inside the rounded card
+   on narrow screens, and bind color-scheme to the app theme so the native time
+   picker icon is legible in dark mode (otherwise it renders dark-on-dark). */
+.prox-field {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+:root[data-theme="dark"] .prox-field { color-scheme: dark; }
+:root[data-theme="light"] .prox-field { color-scheme: light; }
+
 /* ── Digit Panel (ChatGPT OAuth) ── */
 .digit-container {
   display: flex;
@@ -973,5 +992,48 @@ select.field:focus {
 @keyframes pulse-out {
   0% { transform: scale(1.1); opacity: 0.8; }
   100% { transform: scale(2.8); opacity: 0; }
+}
+
+/* ── Exercise snacks: stoplight circle states + completion pop ──
+   neutral upcoming breathes calmly; a grabbed (pending) snack pulses yellow;
+   an overdue snack blinks red. */
+.snack-next {
+  animation: snack-breathe 2.4s ease-in-out infinite;
+}
+@keyframes snack-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink-soft) 45%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+}
+.snack-pending {
+  animation: snack-pending-pulse 1.8s ease-in-out infinite;
+}
+@keyframes snack-pending-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--food) 60%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+}
+.snack-due {
+  animation: snack-blink 1.8s ease-in-out infinite;
+}
+@keyframes snack-blink {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--heart) 70%, transparent); }
+  50% { opacity: 0.3; box-shadow: 0 0 0 6px transparent; }
+}
+.snack-pop {
+  animation: snack-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes snack-pop {
+  0% { transform: scale(0.5); }
+  55% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+.snack-celebrate {
+  animation: snack-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes snack-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snack-next, .snack-pending, .snack-due, .snack-pop, .snack-celebrate { animation: none; }
 }
 

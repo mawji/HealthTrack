@@ -4,32 +4,35 @@ import { useEffect, useRef, useState } from "react";
 import { ChatMessage, DaySummary } from "@/lib/types";
 import { VizCard, VizPlaceholder } from "@/components/ChatVisuals";
 import Toast from "@/components/Toast";
+import { FENCE_RE, tryParseSpec } from "@/lib/coach/parse";
+import { detectSources } from "@/lib/coach/source-pills";
 
 // ── Fenced protocols: ```viz renders a card, ```log executes an action ──
-
-const FENCE_RE = /```(viz|log)\s*([\s\S]*?)```/g;
-
-function tryParseSpec(raw: string): any | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // tolerate single quotes / unquoted keys from smaller models
-    try {
-      const relaxed = raw
-        .replace(/([{,]\s*)([A-Za-z_]\w*)(\s*:)/g, '$1"$2"$3')
-        .replace(/'/g, '"');
-      return JSON.parse(relaxed);
-    } catch {
-      return null;
-    }
-  }
-}
+// The regex + lenient JSON parse are shared with the Telegram handler via
+// lib/coach/parse.ts; splitParts below adds the streaming "pending" handling
+// that only the live web render needs.
 
 type Part =
   | { kind: "text"; value: string }
   | { kind: "viz"; spec: any }
   | { kind: "action"; spec: any; raw: string }
   | { kind: "pending" };
+
+type ConvMeta = { id: string; title: string; updatedAt: string; messageCount: number };
+
+/** Compact "2h ago" / "3d ago" label for the history list. */
+function relativeTime(iso: string): string {
+  const diff = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(diff)) return "";
+  const m = Math.round(diff / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 /** Renders **bold** spans — gpt-oss likes markdown emphasis. */
 function renderInline(text: string) {
@@ -65,12 +68,15 @@ function splitParts(content: string): Part[] {
 // Executed action signatures survive re-renders and streaming re-parses.
 const executedActions = new Set<string>();
 
-function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: string }) {
+function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: string; msgKey: string; inert?: boolean }) {
   const [status, setStatus] = useState<"running" | "done" | "failed">("running");
   const [detail, setDetail] = useState("");
   const [isPlan, setIsPlan] = useState(false);
+  // Memory actions (rememberFact/updateMemory/forgetFact) get their own verbs.
+  const [memVerb, setMemVerb] = useState<string | null>(null);
 
   useEffect(() => {
+    if (inert) return; // history-loaded actions never re-execute
     const sig = `${msgKey}:${raw}`;
     if (executedActions.has(sig)) return;
     executedActions.add(sig);
@@ -162,6 +168,60 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
             `${saved.name} · ${saved.date} · ${saved.durationMin} min` +
               (saved.estCalories ? ` · ~${saved.estCalories} kcal (est.)` : "")
           );
+        } else if (spec.action === "logExerciseSnack") {
+          const res = await fetch("/api/exercise-snacks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ routineId: spec.routineId, source: "coach" }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const state = await res.json();
+          setDetail(`snack ${state.completed.length} of ${state.target} today`);
+        } else if (spec.action === "rememberFact") {
+          setMemVerb("Remembered");
+          const res = await fetch("/api/coach/memory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: spec.text, category: spec.category, source: "coach" }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const m = await res.json();
+          setDetail(m.text);
+        } else if (spec.action === "updateMemory") {
+          setMemVerb("Updated");
+          const res = await fetch("/api/coach/memory", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: spec.id, text: spec.text, category: spec.category }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const m = await res.json();
+          setDetail(m.text);
+        } else if (spec.action === "forgetFact") {
+          setMemVerb("Forgot");
+          const res = await fetch(`/api/coach/memory?id=${encodeURIComponent(spec.id)}`, { method: "DELETE" });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          setDetail("removed from memory");
+        } else if (spec.action === "answerQuestion") {
+          setMemVerb("Noted");
+          const res = await fetch("/api/coach/questions/answer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: spec.id, action: "answer", answer: spec.answer, memoryText: spec.memoryText, category: spec.category, topic: spec.topic }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          setDetail(spec.memoryText || spec.answer || "saved");
+          try { window.dispatchEvent(new Event("ht-question-changed")); } catch {}
+        } else if (spec.action === "declineTopic") {
+          setMemVerb("Noted");
+          const res = await fetch("/api/coach/questions/answer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: spec.id, action: "decline", topic: spec.topic }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          setDetail("won't bring that up again");
+          try { window.dispatchEvent(new Event("ht-question-changed")); } catch {}
         } else {
           throw new Error(`unknown action ${spec.action}`);
         }
@@ -173,6 +233,22 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // History-loaded action: show a neutral, already-done chip without re-running.
+  if (inert) {
+    const verb =
+      spec?.action === "rememberFact" || spec?.action === "updateMemory" ? "Remembered"
+      : spec?.action === "forgetFact" ? "Forgot"
+      : spec?.action === "answerQuestion" || spec?.action === "declineTopic" ? "Noted"
+      : spec?.action === "planWorkout" ? "Planned"
+      : "Logged";
+    return (
+      <div className="row" style={{ gap: 10, alignSelf: "flex-start", padding: "8px 14px", borderRadius: 14, border: "1px solid var(--hairline)", background: "var(--bg-raised)", fontSize: 13 }}>
+        <span style={{ color: "var(--ink-faint)", fontSize: 15 }}>✓</span>
+        <span style={{ color: "var(--ink-faint)" }}>{verb} earlier in this chat</span>
+      </div>
+    );
+  }
 
   const color = status === "failed" ? "var(--heart)" : "var(--activity)";
   return (
@@ -193,10 +269,10 @@ function ActionRunner({ spec, raw, msgKey }: { spec: any; raw: string; msgKey: s
       </span>
       <span style={{ color: "var(--ink-soft)" }}>
         {status === "running"
-          ? isPlan ? "Planning…" : "Logging…"
+          ? memVerb ? "Saving…" : isPlan ? "Planning…" : "Logging…"
           : status === "done"
-            ? `${isPlan ? "Planned" : "Logged"} — ${detail}`
-            : `Couldn't ${isPlan ? "plan" : "log"}: ${detail}`}
+            ? `${memVerb ?? (isPlan ? "Planned" : "Logged")} — ${detail}`
+            : `Couldn't ${memVerb ? "save" : isPlan ? "plan" : "log"}: ${detail}`}
       </span>
     </div>
   );
@@ -207,11 +283,15 @@ function MessageContent({
   week,
   isChat = true,
   msgKey = "",
+  executable = true,
 }: {
   content: string;
   week: DaySummary[];
   isChat?: boolean;
   msgKey?: string;
+  /** Whether ```log actions in this message should execute. False for messages
+   *  loaded from history so reopening a past chat doesn't re-run logging. */
+  executable?: boolean;
 }) {
   if (!content) {
     if (!isChat) return null;
@@ -239,8 +319,10 @@ function MessageContent({
           return part.spec ? <VizCard key={i} spec={part.spec} week={week} /> : null;
         }
         if (part.kind === "action") {
-          // Only chat messages execute; insights never carry actions.
+          // Only live chat messages execute; insights and history-loaded messages
+          // render their actions inert so reopening a chat doesn't re-log.
           if (!isChat || !part.spec) return null;
+          if (!executable) return <ActionRunner key={i} spec={part.spec} raw={part.raw} msgKey={msgKey} inert />;
           return <ActionRunner key={i} spec={part.spec} raw={part.raw} msgKey={msgKey} />;
         }
         const text = part.value.trim();
@@ -273,6 +355,43 @@ function MessageContent({
         );
       })}
     </>
+  );
+}
+
+/** Provenance pills under a coach reply — one per source the coach referenced
+ *  (evidence guideline or data source), tappable to the source. */
+function SourcePills({ content }: { content: string }) {
+  const pills = detectSources(content);
+  if (!pills.length) return null;
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+      {pills.map((p) => (
+        <a
+          key={p.id}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 11px",
+            borderRadius: 999,
+            fontSize: 12,
+            fontWeight: 600,
+            textDecoration: "none",
+            color: "var(--breath)",
+            background: "color-mix(in srgb, var(--breath) 14%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--breath) 30%, transparent)",
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          {p.label}
+        </a>
+      ))}
+    </div>
   );
 }
 
@@ -333,6 +452,16 @@ export default function Coach() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  // Gate the starter suggestions until we've checked for an open question, so a
+  // pending question doesn't flash behind the default suggestions.
+  const [questionChecked, setQuestionChecked] = useState(false);
+  // Conversation persistence + history.
+  const [convId, setConvId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<ConvMeta[]>([]);
+  // Messages at index >= liveFromIndex were produced in this session and may
+  // execute their actions; earlier ones (loaded from history) render inert.
+  const [liveFromIndex, setLiveFromIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [weekData, setWeekData] = useState<DaySummary[]>([]);
@@ -349,6 +478,35 @@ export default function Coach() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Opening the coach raises any open proactive question first. Fast path: an
+  // already-open question (e.g. tapped from the Daily card) is a local read, so
+  // seed it immediately — no waiting on the slower evaluate (which hits Google
+  // Health) and no flash of the default suggestions. Then evaluate in the
+  // background to reconcile a stale one / create a new one.
+  useEffect(() => {
+    let cancelled = false;
+    const seedIfOpen = (d: any) => {
+      if (!cancelled && d?.open?.prompt) {
+        setMessages((m) => (m.length === 0 ? [{ role: "assistant", content: d.open.prompt }] : m));
+      }
+    };
+    (async () => {
+      try {
+        seedIfOpen(await fetch("/api/coach/questions").then((r) => r.json()));
+      } catch {
+        // best-effort
+      }
+      if (!cancelled) setQuestionChecked(true);
+      try {
+        await fetch("/api/coach/questions", { method: "POST" }).catch(() => {});
+        seedIfOpen(await fetch("/api/coach/questions").then((r) => r.json()));
+      } catch {
+        // best-effort
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function send() {
     const text = input.trim();
@@ -378,6 +536,9 @@ export default function Coach() {
         acc += decoder.decode(value, { stream: true });
         setMessages([...next, { role: "assistant", content: acc }]);
       }
+      // Persist the conversation (verbatim, incl. viz/log fences) so it can be
+      // revisited or continued later. Save once the exchange is complete.
+      persist([...next, { role: "assistant", content: acc }]);
     } catch (e: any) {
       setMessages([...next, { role: "assistant", content: `⚠ ${e.message ?? e}` }]);
     } finally {
@@ -385,27 +546,100 @@ export default function Coach() {
     }
   }
 
+  async function persist(msgs: ChatMessage[]) {
+    try {
+      const saved = await fetch("/api/coach/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: convId, messages: msgs }),
+      }).then((r) => r.json());
+      if (saved?.id) setConvId(saved.id);
+    } catch {
+      // best-effort
+    }
+  }
+
+  function newChat() {
+    setMessages([]);
+    setConvId(null);
+    setLiveFromIndex(0);
+    setHistoryOpen(false);
+  }
+
+  async function toggleHistory() {
+    const open = !historyOpen;
+    setHistoryOpen(open);
+    if (open) {
+      const d = await fetch("/api/coach/conversations").then((r) => r.json()).catch(() => ({}));
+      setHistory(d.conversations ?? []);
+    }
+  }
+
+  async function openConversation(id: string) {
+    const c = await fetch(`/api/coach/conversations?id=${id}`).then((r) => r.json()).catch(() => null);
+    if (c?.messages) {
+      setMessages(c.messages);
+      setConvId(c.id);
+      setLiveFromIndex(c.messages.length); // loaded messages are inert (no re-logging)
+    }
+    setHistoryOpen(false);
+  }
+
+  async function deleteConversation(id: string) {
+    await fetch(`/api/coach/conversations?id=${id}`, { method: "DELETE" }).catch(() => {});
+    setHistory((h) => h.filter((c) => c.id !== id));
+    if (convId === id) newChat();
+  }
+
   return (
     <main className="page" style={{ display: "flex", flexDirection: "column", maxWidth: 720 }}>
       <Toast message={fallbackNote} onDone={() => setFallbackNote(null)} tone="warn" />
       <header className="rise rise-1" style={{ marginBottom: 14 }}>
-        <div className="row" style={{ gap: 14 }}>
-          <div
-            className="orb"
-            style={{
-              width: 46,
-              height: 46,
-              borderRadius: "50%",
-              flex: "none",
-              background: "radial-gradient(circle at 32% 30%, var(--breath-soft), var(--breath))",
-              boxShadow: "0 0 0 6px var(--breath-soft)",
-            }}
-          />
-          <div>
-            <h1 className="page-title">Coach.</h1>
-            <p className="page-sub">Ask a question, or tell me what you ate or trained.</p>
+        <div className="row" style={{ gap: 14, justifyContent: "space-between" }}>
+          <div className="row" style={{ gap: 14 }}>
+            <div
+              className="orb"
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: "50%",
+                flex: "none",
+                background: "radial-gradient(circle at 32% 30%, var(--breath-soft), var(--breath))",
+                boxShadow: "0 0 0 6px var(--breath-soft)",
+              }}
+            />
+            <div>
+              <h1 className="page-title">Coach.</h1>
+              <p className="page-sub">Ask a question, or tell me what you ate or trained.</p>
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8, flex: "none" }}>
+            <button className="btn btn-ghost" style={{ padding: "7px 12px", fontSize: 12.5 }} onClick={newChat} title="Start a new chat">New</button>
+            <button className="btn btn-ghost" style={{ padding: "7px 12px", fontSize: 12.5 }} onClick={toggleHistory} title="Past conversations">History</button>
           </div>
         </div>
+
+        {historyOpen && (
+          <div className="card" style={{ marginTop: 12, padding: 8, maxHeight: 320, overflowY: "auto" }}>
+            {history.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--ink-soft)", padding: "8px 10px" }}>No saved conversations yet.</p>
+            ) : (
+              history.map((c) => (
+                <div key={c.id} className="row" style={{ justifyContent: "space-between", gap: 8, padding: "4px 2px" }}>
+                  <button
+                    onClick={() => openConversation(c.id)}
+                    className="row"
+                    style={{ flex: 1, minWidth: 0, gap: 8, padding: "8px 10px", borderRadius: 10, border: "none", background: convId === c.id ? "color-mix(in srgb, var(--breath) 12%, transparent)" : "transparent", color: "var(--ink)", cursor: "pointer", textAlign: "left" }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-faint)", flex: "none" }}>{relativeTime(c.updatedAt)}</span>
+                  </button>
+                  <button aria-label="delete conversation" className="icon-btn" style={{ color: "var(--ink-faint)", flex: "none" }} onClick={() => deleteConversation(c.id)}>✕</button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </header>
 
       {/* Chat */}
@@ -415,7 +649,7 @@ export default function Coach() {
           Ask your coach
         </div>
         <div className="stack" style={{ gap: 12, flex: 1 }}>
-          {messages.length === 0 && (
+          {messages.length === 0 && questionChecked && (
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               {suggestions.map((s) => (
                 <button key={s} className="btn btn-ghost" style={{ fontSize: 12.5, padding: "8px 14px" }} onClick={() => setInput(s)}>
@@ -452,7 +686,10 @@ export default function Coach() {
                   {m.content}
                 </div>
               ) : (
-                <MessageContent content={m.content} week={weekData} msgKey={`m${i}`} />
+                <>
+                  <MessageContent content={m.content} week={weekData} msgKey={`m${i}`} executable={i >= liveFromIndex} />
+                  <SourcePills content={m.content} />
+                </>
               )}
             </div>
           ))}

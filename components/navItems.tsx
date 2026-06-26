@@ -107,4 +107,16 @@ export const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    href: "/memory",
+    label: "Memory",
+    color: "var(--breath)",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 3.5a4.5 4.5 0 0 0-4 6.6 4 4 0 0 0 1 5.4V20h3v-2.5" />
+        <path d="M15 3.5a4.5 4.5 0 0 1 4 6.6 4 4 0 0 1-1 5.4V20h-3v-2.5" />
+        <path d="M12 4.5v12" />
+      </svg>
+    ),
+  },
 ];

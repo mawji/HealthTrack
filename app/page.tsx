@@ -24,6 +24,8 @@ import {
 } from "@/components/icons";
 import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
+import ExerciseSnacks from "@/components/ExerciseSnacks";
+import CoachQuestionCard from "@/components/CoachQuestionCard";
 import type { WorkoutPlanItem } from "@/lib/training-plan";
 import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
 import { detailIsEmpty, formatDetail } from "@/lib/workout-detail";
@@ -157,16 +159,35 @@ export default function Daily() {
 
     const intervalMs = intervalMinutes * 60 * 1000;
 
+    const doRefresh = () => {
+      setIsRefreshing(true);
+      refreshCurrentData(shownDate, true).finally(() => setIsRefreshing(false));
+    };
+
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        setIsRefreshing(true);
-        refreshCurrentData(shownDate, true).finally(() => {
-          setIsRefreshing(false);
-        });
-      }
+      if (document.visibilityState === "visible") doRefresh();
     }, intervalMs);
 
-    return () => clearInterval(interval);
+    // PWAs/mobile browsers suspend setInterval when backgrounded, so the timer
+    // alone leaves the dashboard stale until a navigation remounts it. Refetch
+    // when the app returns to the foreground — throttled so it doesn't double up
+    // with a tick that just fired.
+    let lastForeground = 0;
+    const onForeground = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastForeground < 30_000) return;
+      lastForeground = now;
+      doRefresh();
+    };
+    document.addEventListener("visibilitychange", onForeground);
+    window.addEventListener("focus", onForeground);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onForeground);
+      window.removeEventListener("focus", onForeground);
+    };
   }, [data?.today.date, refreshCurrentData]);
 
   // Daily inline insights + app-derived readiness dial, refetched per displayed day.
@@ -491,7 +512,11 @@ export default function Daily() {
         </div>
       </header>
 
+      {isToday && <CoachQuestionCard />}
+
       <div className="stack desk-grid">
+        {isToday && <ExerciseSnacks />}
+
         <DailyGoals data={goalsData} />
 
         <h2 className="section-title desk-span rise rise-1">Daily activity</h2>

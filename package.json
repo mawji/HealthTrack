@@ -7,8 +7,11 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "dev": "next dev -p 3210 -H 127.0.0.1",
+    "dev": "node scripts/dev.mjs",
+    "dev:next": "next dev -p 3210 -H 127.0.0.1",
     "dev:lan": "next dev -p 3210 -H 0.0.0.0",
+    "telegram:bridge": "node scripts/telegram-bridge.mjs",
+    "proactive:scheduler": "node scripts/proactive-scheduler.mjs",
     "build": "next build",
     "start": "next start -p 3210 -H 127.0.0.1",
     "start:lan": "next start -p 3210 -H 0.0.0.0",

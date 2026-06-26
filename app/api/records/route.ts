@@ -5,8 +5,18 @@ import { readJson, writeJson, newId, dataPath, ensureDir } from "@/lib/store";
 import { complete, hasAiKey } from "@/lib/openrouter";
 import { extractLabReport, ParsedReport } from "@/lib/labs";
 import { MedicalRecord } from "@/lib/types";
+import { runMemoryWatchers } from "@/lib/memory-watchers";
 
 const INDEX = "records-index.json";
+
+/** Re-derive silent-watcher pattern memories after a record changes. Best-effort. */
+function deriveMemories() {
+  try {
+    runMemoryWatchers();
+  } catch (e) {
+    console.error("Memory watchers failed:", e);
+  }
+}
 
 async function extractPdfText(buf: Buffer, password?: string): Promise<string> {
   // pdf-parse ignores options.password (it passes the raw buffer to getDocument, never the options object).
@@ -139,6 +149,7 @@ export async function POST(req: NextRequest) {
   const records = readJson<MedicalRecord[]>(INDEX, []);
   records.push(record);
   writeJson(INDEX, records);
+  deriveMemories();
   return NextResponse.json(record);
 }
 
@@ -186,6 +197,7 @@ export async function PUT(req: NextRequest) {
   }
 
   writeJson(INDEX, records);
+  deriveMemories();
   return NextResponse.json(record);
 }
 
@@ -196,6 +208,7 @@ export async function DELETE(req: NextRequest) {
     INDEX,
     records.filter((r) => r.id !== id)
   );
+  deriveMemories();
   try {
     const dir = dataPath("records");
     for (const f of fs.readdirSync(dir)) {

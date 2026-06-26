@@ -6,10 +6,12 @@ import BatteryIndicator from "./BatteryIndicator";
 import { NAV_ITEMS } from "./navItems";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
+import { useOpenQuestion } from "./useOpenQuestion";
 
 /** Desktop sidebar — Apple-Health-style category list with colored icons. */
 export default function Sidebar() {
   const pathname = usePathname();
+  const { open } = useOpenQuestion();
   return (
     <aside className="sidebar">
       <div className="wordmark">
@@ -19,7 +21,7 @@ export default function Sidebar() {
         </div>
       </div>
       {NAV_ITEMS.map((t) => (
-        <Link key={t.href} href={t.href} className={`side-link ${pathname === t.href ? "active" : ""}`}>
+        <Link key={t.href} href={t.href} className={`side-link ${pathname === t.href ? "active" : ""}`} style={{ position: "relative" }}>
           <span
             className="side-icon"
             style={{
@@ -30,6 +32,12 @@ export default function Sidebar() {
             {t.icon}
           </span>
           {t.label}
+          {open && t.href === "/coach" && (
+            <span
+              aria-label="a question from your coach"
+              style={{ marginLeft: "auto", width: 9, height: 9, borderRadius: "50%", background: "var(--breath)", flex: "none" }}
+            />
+          )}
         </Link>
       ))}
       <div className="side-foot">

@@ -28,6 +28,12 @@ export interface DailyInsightData {
 const DAY_START_MIN = 7 * 60;
 const DAY_END_MIN = 22 * 60;
 
+// The app's daily hydration target (ml). Single source of truth shared with the
+// proactive engine so nudges and inline insights judge water against the same
+// goal. (There is no per-user water goal in the goals system yet; when one is
+// added, both should read it from there.)
+export const WATER_TARGET_ML = 2000;
+
 function tzNowMinutes(now: Date): number {
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -102,7 +108,7 @@ export function gateDaily(
 
   // ── Hydration: water vs time-of-day pace toward a 2 L day ──
   if (waterMl != null) {
-    const target = 2000;
+    const target = WATER_TARGET_ML;
     const expected = target * frac;
     if (frac > 0.2 && waterMl < 0.6 * expected) {
       const behindGlasses = Math.max(1, Math.round((expected - waterMl) / 250));

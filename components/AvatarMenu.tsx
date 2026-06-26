@@ -137,6 +137,13 @@ export default function AvatarMenu() {
                   <path d="M4 19.5l1-3.6L15.4 5.5l2.6 2.6L7.6 18.5z" /><path d="M13.6 7.3l2.6 2.6" /><path d="M4 21h16" />
                 </svg>
               } />
+              <MenuLink href="/memory" label="Memory" onClick={() => setOpen(false)} icon={
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 3.5a4.5 4.5 0 0 0-4 6.6 4 4 0 0 0 1 5.4V20h3v-2.5" />
+                  <path d="M15 3.5a4.5 4.5 0 0 1 4 6.6 4 4 0 0 1-1 5.4V20h-3v-2.5" />
+                  <path d="M12 4.5v12" />
+                </svg>
+              } />
               <MenuLink href="/records" label="Records" onClick={() => setOpen(false)} icon={
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M6 3h9l4 4v14H6z" /><path d="M15 3v4h4" /><path d="M9.5 13h5M9.5 16.5h5" />

@@ -10,6 +10,7 @@ import {
   markMeasurementSynced,
 } from "@/lib/measurements";
 import { MeasurementKind } from "@/lib/types";
+import { runMemoryWatchers } from "@/lib/memory-watchers";
 
 /** GET /api/measurements?kind=&limit= → recent manual measurements, newest first. */
 export async function GET(req: NextRequest) {
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     console.error("Measurement Google Health sync failed:", e);
+  }
+  // Silent watchers: a new BP/weight reading may reveal (or resolve) a pattern.
+  try {
+    runMemoryWatchers();
+  } catch (e) {
+    console.error("Memory watchers failed:", e);
   }
   return NextResponse.json(m);
 }

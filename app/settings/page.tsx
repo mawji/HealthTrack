@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 import { IconChip, HeartIcon, ScaleIcon, LungsIcon } from "@/components/icons";
+import SharingPanel from "./SharingPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,33 @@ interface DeviceFlow {
   verificationUri: string;
   interval: number;
   expiresAt: number;
+}
+
+interface TelegramStatus {
+  configured: boolean;
+  paired: boolean;
+  ownerUsername: string | null;
+  ownerName: string;
+  pairedAt: string | null;
+  confirmBeforeLog: boolean;
+}
+
+interface ProactivePrefs {
+  enabled: boolean;
+  maxPerDay: number;
+  minGapHours: number;
+  quietStart: string;
+  quietEnd: string;
+  usualBedtime: string;
+  categories: Record<string, boolean>;
+  recentDeliveries: { at: string; title: string; reason: string }[];
+}
+
+interface ProactiveDryRun {
+  enabled: boolean;
+  suppressedReason: string | null;
+  candidates: { id: string; title: string; body: string; priority: string }[];
+  chosen: { id: string; title: string } | null;
 }
 
 // Models available on a ChatGPT subscription via the Codex responses backend.
@@ -147,11 +175,26 @@ export default function Settings() {
   const [deviceErr, setDeviceErr]     = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Telegram bot state
+  const [tg, setTg]             = useState<TelegramStatus | null>(null);
+  const [tgToken, setTgToken]   = useState("");
+  const [tgPairing, setTgPairing] = useState<{ code: string; expiresAt: number } | null>(null);
+  const [tgBusy, setTgBusy]     = useState(false);
+  const [tgErr, setTgErr]       = useState<string | null>(null);
+
+  // Proactive guidance state
+  const [prox, setProx]         = useState<ProactivePrefs | null>(null);
+  const [proxDry, setProxDry]   = useState<ProactiveDryRun | null>(null);
+  const [proxBusy, setProxBusy] = useState(false);
+  const [proxTestMsg, setProxTestMsg] = useState<string | null>(null);
+
   const load        = useCallback(() => fetch("/api/settings").then((r) => r.json()).then(setData).catch(() => {}), []);
   const loadArchive = useCallback(() => fetch("/api/archive").then((r) => r.json()).then(setArchive).catch(() => {}), []);
   const loadAi      = useCallback(() => fetch("/api/ai-provider").then((r) => r.json()).then(setAi).catch(() => {}), []);
+  const loadTg      = useCallback(() => fetch("/api/telegram/config").then((r) => r.json()).then(setTg).catch(() => {}), []);
+  const loadProx    = useCallback(() => fetch("/api/proactive/preferences").then((r) => r.json()).then(setProx).catch(() => {}), []);
 
-  useEffect(() => { load(); loadArchive(); loadAi(); }, [load, loadArchive, loadAi]);
+  useEffect(() => { load(); loadArchive(); loadAi(); loadTg(); loadProx(); }, [load, loadArchive, loadAi, loadTg, loadProx]);
 
   // Poll for ChatGPT device code authorization
   useEffect(() => {
@@ -310,7 +353,7 @@ export default function Settings() {
 
   const s = data?.settings;
 
-  const [activeTab, setActiveTab] = useState<"integrations" | "ai" | "preferences" | "archive">("integrations");
+  const [activeTab, setActiveTab] = useState<"integrations" | "ai" | "telegram" | "sharing" | "preferences" | "archive">("integrations");
 
   useEffect(() => {
     if (archive?.backfill) {
@@ -832,6 +875,306 @@ export default function Settings() {
     );
   }
 
+  async function tgAction(body: Record<string, unknown>): Promise<any | null> {
+    setTgBusy(true);
+    setTgErr(null);
+    try {
+      const res = await fetch("/api/telegram/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Request failed");
+      setTg(json);
+      return json;
+    } catch (e: any) {
+      setTgErr(String(e.message ?? e));
+      return null;
+    } finally {
+      setTgBusy(false);
+    }
+  }
+
+  async function proxSave(patch: Record<string, unknown>) {
+    setProxBusy(true);
+    try {
+      const res = await fetch("/api/proactive/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setProx(await res.json());
+    } catch { /* ignore */ } finally { setProxBusy(false); }
+  }
+
+  async function proxTest() {
+    setProxBusy(true);
+    setProxTestMsg(null);
+    try {
+      setProxDry(await fetch("/api/proactive/evaluate").then((r) => r.json()));
+    } catch { /* ignore */ } finally { setProxBusy(false); }
+  }
+
+  async function proxSendTest() {
+    setProxBusy(true);
+    setProxTestMsg(null);
+    try {
+      const res = await fetch("/api/proactive/test", { method: "POST" });
+      const json = await res.json();
+      setProxTestMsg(res.ok ? `✅ Sent to Telegram (${json.sample}).` : `⚠ ${json.error ?? "Failed"}`);
+    } catch (e: any) {
+      setProxTestMsg(`⚠ ${String(e.message ?? e)}`);
+    } finally { setProxBusy(false); }
+  }
+
+  function renderTelegram() {
+    const fieldStyle = {
+      flex: 1, padding: "9px 12px", borderRadius: 10,
+      border: "1px solid var(--hairline)", background: "var(--bg-inset)",
+      color: "var(--ink)", fontSize: 13.5,
+    } as const;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        <section className="card rise rise-2">
+          <div className="card-label" style={{ marginBottom: 14 }}>
+            <IconChip icon={LungsIcon} color="var(--activity)" />
+            Telegram Coach
+          </div>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -4, marginBottom: 14, lineHeight: 1.5 }}>
+            Chat with your coach, log workouts/food/water, and get your metrics from Telegram — a second
+            front-end to the same coach. Owner-only: the bot answers nobody until you pair below.
+          </p>
+
+          {/* Step 1 — bot token */}
+          <div className="stack" style={{ gap: 8, marginBottom: 18 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>1 · Bot token</span>
+            <span style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+              In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token it gives you.
+              It’s stored locally and never committed.
+            </span>
+            {tg?.configured ? (
+              <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "var(--activity)", fontWeight: 600 }}>✅ Token saved</span>
+                <button className="btn btn-ghost" disabled={tgBusy} onClick={() => tgAction({ action: "clearToken" })}>
+                  Replace
+                </button>
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 8 }}>
+                <input
+                  type="password"
+                  placeholder="123456:ABC-DEF…"
+                  value={tgToken}
+                  onChange={(e) => setTgToken(e.target.value)}
+                  style={fieldStyle}
+                />
+                <button
+                  className="btn"
+                  disabled={tgBusy || !tgToken.trim()}
+                  onClick={async () => { if (await tgAction({ action: "saveToken", token: tgToken })) setTgToken(""); }}
+                >
+                  Save
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Step 2 — pairing */}
+          {tg?.configured && (
+            <div className="stack" style={{ gap: 8, marginBottom: 18 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>2 · Pair your account</span>
+              {tg.paired ? (
+                <div className="row" style={{ gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13 }}>
+                    ✅ Paired{tg.ownerUsername ? ` as @${tg.ownerUsername}` : ""}
+                  </span>
+                  <button className="btn btn-ghost" disabled={tgBusy} onClick={() => { tgAction({ action: "unpair" }); setTgPairing(null); }}>
+                    Unpair
+                  </button>
+                </div>
+              ) : tgPairing ? (
+                <div className="stack" style={{ gap: 6, background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+                  <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                    Open your bot in Telegram and send this within 15 minutes:
+                  </span>
+                  <code style={{ fontSize: 15, fontWeight: 700, color: "var(--activity)" }}>/start {tgPairing.code}</code>
+                  <button className="btn btn-ghost" style={{ alignSelf: "flex-start", marginTop: 4 }} disabled={tgBusy} onClick={() => { loadTg(); }}>
+                    I’ve sent it — refresh
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn"
+                  style={{ alignSelf: "flex-start" }}
+                  disabled={tgBusy}
+                  onClick={async () => { const r = await tgAction({ action: "pair" }); if (r?.pairing) setTgPairing(r.pairing); }}
+                >
+                  Generate pairing code
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Step 3 — your name (shown to shared contacts) */}
+          {tg?.paired && (
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12, background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)", marginBottom: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 12 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Your name</span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Shown to shared contacts as “&lt;name&gt;’s HealthTrack”.</span>
+              </div>
+              <input
+                key={tg.ownerName}
+                defaultValue={tg.ownerName}
+                placeholder="e.g. Shams"
+                disabled={tgBusy}
+                onBlur={(e) => { if (e.target.value !== tg.ownerName) tgAction({ action: "setOwnerName", name: e.target.value }); }}
+                style={{ width: 160, padding: "8px 11px", borderRadius: 10, border: "1px solid var(--hairline)", background: "var(--bg-raised)", color: "var(--ink)", fontSize: 13.5 }}
+              />
+            </div>
+          )}
+
+          {/* Step 4 — behavior */}
+          {tg?.paired && (
+            <div className="row" style={{ justifyContent: "space-between", background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 12 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Confirm before logging</span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                  Hold logs for a Confirm tap — recommended for voice dictation, where speech-to-text errs.
+                </span>
+              </div>
+              <button
+                className={tg.confirmBeforeLog ? "btn" : "btn btn-ghost"}
+                disabled={tgBusy}
+                onClick={() => tgAction({ action: "setConfirm", value: !tg.confirmBeforeLog })}
+              >
+                {tg.confirmBeforeLog ? "On" : "Off"}
+              </button>
+            </div>
+          )}
+
+          {tgErr && <p style={{ fontSize: 12.5, color: "var(--heart)", marginTop: 12 }}>{tgErr}</p>}
+
+          <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 16, lineHeight: 1.5 }}>
+            The bot runs via a local long-poll worker started with the app (<code>npm run dev</code>). Telegram messages
+            are not end-to-end encrypted — avoid sharing anything you wouldn’t put in a normal chat.
+          </p>
+        </section>
+
+        {/* Proactive guidance (item 14) — Telegram is the delivery channel */}
+        <section className="card rise rise-3">
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="card-label">
+              <IconChip icon={HeartIcon} color="var(--heart)" />
+              Proactive nudges
+            </div>
+            {prox && (
+              <button
+                className={prox.enabled ? "btn" : "btn btn-ghost"}
+                disabled={proxBusy}
+                onClick={() => proxSave({ enabled: !prox.enabled })}
+              >
+                {prox.enabled ? "On" : "Off"}
+              </button>
+            )}
+          </div>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 14, lineHeight: 1.5 }}>
+            Opt-in reminders when you’re falling behind on your <b>daily goals</b> — steps and habits come
+            from what you’ve set in Goals/Habits; hydration uses the app’s 2 L/day target. Plus a daily report,
+            all delivered to your paired Telegram. The settings below only control <i>how often</i> nudges arrive.
+          </p>
+
+          {prox?.enabled && (
+            <div className="stack" style={{ gap: 12 }}>
+              <div className="pref-grid">
+                {([
+                  ["Quiet from", "quietStart"],
+                  ["Quiet until", "quietEnd"],
+                  ["Usual bedtime", "usualBedtime"],
+                ] as const).map(([label, key]) => (
+                  <div key={key} className="pref-card">
+                    <span className="pref-card-label">{label}</span>
+                    <input
+                      type="time"
+                      className="prox-field"
+                      value={(prox as any)[key]}
+                      disabled={proxBusy}
+                      onChange={(e) => proxSave({ [key]: e.target.value })}
+                    />
+                  </div>
+                ))}
+                <div className="pref-card">
+                  <span className="pref-card-label">Max nudges / day</span>
+                  <select className="prox-field" value={prox.maxPerDay} disabled={proxBusy} onChange={(e) => proxSave({ maxPerDay: Number(e.target.value) })}>
+                    {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div className="pref-card">
+                  <span className="pref-card-label">Min hours apart</span>
+                  <select className="prox-field" value={prox.minGapHours} disabled={proxBusy} onChange={(e) => proxSave({ minGapHours: Number(e.target.value) })}>
+                    {[1, 2, 3, 4, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="stack" style={{ gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)" }}>What to nudge about</span>
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  {Object.entries(prox.categories).map(([cat, on]) => (
+                    <button
+                      key={cat}
+                      className={on ? "btn" : "btn btn-ghost"}
+                      style={{ fontSize: 12, padding: "5px 12px", textTransform: "capitalize" }}
+                      disabled={proxBusy}
+                      onClick={() => proxSave({ categories: { ...prox.categories, [cat]: !on } })}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn" disabled={proxBusy} onClick={proxSendTest}>Send test to Telegram</button>
+                <button className="btn btn-ghost" disabled={proxBusy} onClick={proxTest}>Preview (nothing sent)</button>
+              </div>
+
+              {proxTestMsg && <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: 0 }}>{proxTestMsg}</p>}
+
+              {proxDry && (
+                <div style={{ background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+                  {proxDry.chosen ? (
+                    <span style={{ fontSize: 13 }}>Would send: <b>{proxDry.chosen.title}</b></span>
+                  ) : (
+                    <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>
+                      Nothing right now{proxDry.suppressedReason ? ` — ${proxDry.suppressedReason}` : ""}.
+                    </span>
+                  )}
+                  {proxDry.candidates?.length > 0 && (
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: "var(--ink-soft)" }}>
+                      {proxDry.candidates.map((c) => <li key={c.id}>{c.title} <span style={{ opacity: 0.6 }}>({c.priority})</span></li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {prox.recentDeliveries?.length > 0 && (
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)" }}>Recently sent</span>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "var(--ink-soft)" }}>
+                    {prox.recentDeliveries.map((d, i) => (
+                      <li key={i}>{d.title} <span style={{ opacity: 0.6 }}>· {new Date(d.at).toLocaleString()}</span></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   function renderArchive() {
     if (!data) return null;
     return (
@@ -945,6 +1288,18 @@ export default function Settings() {
               <span>🧠</span> AI Assistant
             </button>
             <button
+              className={`settings-tab-btn ${activeTab === "telegram" ? "active" : ""}`}
+              onClick={() => setActiveTab("telegram")}
+            >
+              <span>✈️</span> Telegram
+            </button>
+            <button
+              className={`settings-tab-btn ${activeTab === "sharing" ? "active" : ""}`}
+              onClick={() => setActiveTab("sharing")}
+            >
+              <span>🔗</span> Sharing
+            </button>
+            <button
               className={`settings-tab-btn ${activeTab === "preferences" ? "active" : ""}`}
               onClick={() => setActiveTab("preferences")}
             >
@@ -962,6 +1317,8 @@ export default function Settings() {
           <div className="settings-content stack">
             {activeTab === "integrations" && renderIntegrations()}
             {activeTab === "ai" && renderAi()}
+            {activeTab === "telegram" && renderTelegram()}
+            {activeTab === "sharing" && <SharingPanel />}
             {activeTab === "preferences" && renderPreferences()}
             {activeTab === "archive" && renderArchive()}
           </div>

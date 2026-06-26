@@ -460,3 +460,65 @@ export interface DailyInsightsResponse {
   readiness: ReadinessScore | null;
   sections: DailyInsightSection[];
 }
+
+// ── Coach memory (durable facts about the person) ──────────────────────────
+// A small, ranked store of human-readable facts the coach reads each turn and
+// can write to as it learns — so it carries context across sessions and gets
+// smarter by the day. One fact per record; deduplicate/consolidate rather than
+// duplicate; never store what's already trended/logged as a raw value. Local
+// only (data/coach-memory.json), never synced. See plans/coach-memory-system.md.
+
+export type CoachMemoryCategory =
+  | "preference"   // "prefers morning workouts"
+  | "constraint"   // "recovering from a knee injury"
+  | "condition"    // disclosed condition the coach should account for
+  | "lifestyle"    // "has an infant who wakes them at night"
+  | "goal"         // goal-in-progress / agreement
+  | "advice"       // prior advice given
+  | "pattern"      // a derived/consolidated pattern (e.g. from silent watchers)
+  | "openness"     // evolving read of how freely the user shares per area
+  | "boundary"     // explicit do-not-probe (only from an explicit user opt-out)
+  | "other";
+
+export type CoachMemorySource = "coach" | "user" | "proactive" | "derived";
+
+export interface CoachMemory {
+  id: string;
+  text: string; // the fact, one sentence
+  category: CoachMemoryCategory;
+  source: CoachMemorySource;
+  confidence?: number; // 0..1; derived/coach-asserted facts can be soft
+  topic?: string; // coarse grouping key for consolidation (e.g. "sleep", "glucose")
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string; // touched when surfaced into context (ranking/pruning)
+  pinned?: boolean; // user-pinned memories always surface
+  archived?: boolean; // soft-delete
+}
+
+// ── Coach proactive questions ──────────────────────────────────────────────
+// Short questions the coach raises to build a sense of the person's lifestyle.
+// Two kinds: anomaly (deterministic detection of a notable data deviation → AI
+// phrasing) and discovery (AI-driven, indirect, within deterministic rails).
+// Answered conversationally in the coach page; answers become coach memories.
+// Local only (data/coach-questions.json). See plans/coach-proactive-questions.md.
+
+export type CoachQuestionKind = "anomaly" | "discovery";
+export type CoachQuestionStatus = "pending" | "answered" | "dismissed" | "expired";
+
+export interface CoachQuestion {
+  id: string;
+  kind: CoachQuestionKind;
+  ruleId?: string; // anomaly only
+  metric?: string; // anomaly: the concrete figure
+  topic: string; // cooldown + memory grouping key
+  observation?: string; // deterministic fact the question is about (anomaly)
+  prompt: string; // AI-phrased, indirect opener shown to the user
+  status: CoachQuestionStatus;
+  date: string; // local day the trigger fired (yyyy-MM-dd)
+  createdAt: string; // ISO
+  dismissCount?: number; // drives backoff/rephrase
+  answer?: string; // captured gist of the user's reply
+  answeredAt?: string;
+  memoryId?: string; // link to the coach memory created from the answer
+}

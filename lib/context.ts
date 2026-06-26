@@ -38,6 +38,8 @@ import {
 } from "./habits";
 import { getProfile, deriveProfile, ACTIVITY_LABELS, GOAL_LABELS } from "./profile";
 import { formatEvidenceForCoach } from "./evidence";
+import { formatMemoryForCoach } from "./memory";
+import { getOpenQuestion } from "./coach-questions";
 import {
   summarizeWeeklyActivity,
   classifyTrainingBalance,
@@ -47,6 +49,7 @@ import {
 import { computeTargets, formatTargetsForCoach } from "./coach/nutrition-targets";
 import { formatPreventionForCoach } from "./coach/prevention";
 import { formatPlanForCoach } from "./training-plan";
+import { formatSnacksForCoach } from "./exercise-snacks";
 
 /** A meal normalized across the local log and Google Health for the coach. */
 type CoachMeal = {
@@ -272,7 +275,7 @@ function fmtDay(d: DaySummary): string {
 }
 
 /** Compact plain-text health context for the AI coach system prompt. */
-export async function buildCoachContext(days = 14): Promise<{ text: string; demo: boolean }> {
+export async function buildCoachContext(days = 14, query?: string): Promise<{ text: string; demo: boolean }> {
   const { days: range, demo } = await getRecentDays(days);
 
   // Meals from both sources the coach should reason over: the local food log
@@ -487,6 +490,14 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     // habits are optional context
   }
 
+  // Today's exercise snacks (breathless-minute bursts) — progress + loggable
+  // routine ids so the coach can nudge and log via logExerciseSnack.
+  try {
+    lines.push("", formatSnacksForCoach(dateKey(0)));
+  } catch {
+    // snacks are optional context
+  }
+
   // User-set macro goals (coach-visible only), with deterministic status. The
   // coach explains/prioritizes these — it must not recompute or invent targets.
   try {
@@ -536,6 +547,33 @@ export async function buildCoachContext(days = 14): Promise<{ text: string; demo
     if (prevention) lines.push("", prevention);
   } catch {
     // prevention review is optional context
+  }
+
+  // Durable, user-owned facts the coach has learned about the person (preferences,
+  // constraints, conditions, lifestyle, goals, prior advice). Ranked + budgeted so
+  // the prompt stays bounded as memories grow; the current message lightly boosts
+  // relevance. See lib/memory.ts + plans/coach-memory-system.md.
+  try {
+    const memory = formatMemoryForCoach(query);
+    if (memory) lines.push("", memory);
+  } catch {
+    // memory is optional context
+  }
+
+  // One open proactive question the coach should weave in naturally (and capture
+  // the answer to memory). See lib/coach-questions.ts + plans/coach-proactive-questions.md.
+  try {
+    const openQ = getOpenQuestion();
+    if (openQ) {
+      lines.push(
+        "",
+        "== Open question (you raised this; weave it in warmly, don't interrogate) ==",
+        `id: ${openQ.id} · topic: ${openQ.topic}${openQ.observation ? ` · observation: ${openQ.observation}` : ""}`,
+        `The question to explore: "${openQ.prompt}"`
+      );
+    }
+  } catch {
+    // open question is optional context
   }
 
   // Sourced evidence rules the coach may cite (general population guidance; the

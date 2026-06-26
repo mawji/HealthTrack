@@ -453,12 +453,20 @@ export function combineSleepSessions(rawPoints: any[]): SleepSummary | null {
 
   for (const s of sessions) {
     const summary = s.summary ?? {};
-    asleep += Number(summary.minutesAsleep ?? 0);
     inBed += Number(summary.minutesInSleepPeriod ?? 0);
+    let sessStageAsleep = 0;
     for (const st of summary.stagesSummary ?? []) {
       const stage = STAGE_MAP[st.type];
-      if (stage) stages[stage] += Number(st.minutes ?? 0);
+      if (stage) {
+        stages[stage] += Number(st.minutes ?? 0);
+        if (stage !== "wake") sessStageAsleep += Number(st.minutes ?? 0);
+      }
     }
+    // Prefer the API's asleep figure; fall back to summed sleep-stage minutes,
+    // then to in-period minutes, so a fragmented block that omits minutesAsleep
+    // still contributes its real sleep instead of 0 (avoids undercounting a
+    // multi-session night).
+    asleep += Number(summary.minutesAsleep ?? 0) || sessStageAsleep || Number(summary.minutesInSleepPeriod ?? 0);
     // The awake stretch between two sessions (out of bed, back later) gets no
     // stage points from the API, so without this it renders as an empty hole in
     // the hypnogram. Fill it with a wake segment so the Awake bar spans the
@@ -643,6 +651,22 @@ export async function fetchHeartIntraday(date: string): Promise<DaySummary["hear
         max: Math.round(Number(p.heartRate.beatsPerMinuteMax ?? avg)),
       };
     });
+}
+
+/** Fine-grained intraday HR windows (default 3-min) with each window's max BPM
+ *  and absolute start/end (ms). Used to resolve a snack's recent max HR. */
+export async function fetchHeartMaxWindows(
+  date: string,
+  windowSeconds = 180
+): Promise<{ start: number; end: number; max: number }[]> {
+  const heart = await intradayRollUp("heart-rate", date, windowSeconds);
+  return heart
+    .map((p) => {
+      const start = p.startTime ? Date.parse(p.startTime) : 0;
+      const max = Number(p.heartRate?.beatsPerMinuteMax ?? p.heartRate?.beatsPerMinuteAvg);
+      return { start, end: start + windowSeconds * 1000, max: Math.round(max) };
+    })
+    .filter((w) => w.start > 0 && Number.isFinite(w.max));
 }
 
 /** Full single-day summary including intraday heart rate and sleep detail. */

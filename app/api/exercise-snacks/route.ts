@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getSnackDay,
-  resolveSnackHr,
+  resolveSnackDay,
   completeSnack,
   undoSnack,
   setSnackTarget,
 } from "@/lib/exercise-snacks";
 
-/** GET /api/exercise-snacks?date=yyyy-MM-dd → that day's target + completions
- *  (defaults to today), with each completed snack's post-hoc max HR resolved
- *  where the watch has synced it. */
+/** GET /api/exercise-snacks?date=yyyy-MM-dd → that day's target + completions +
+ *  live timer session (defaults to today). Also resolves post-hoc HR pills,
+ *  auto-stops a forgotten session, and reconciles it against synced HR. */
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get("date") ?? undefined;
   try {
-    return NextResponse.json(await resolveSnackHr(date ?? undefined));
+    return NextResponse.json(await resolveSnackDay(date ?? undefined));
   } catch {
     return NextResponse.json(getSnackDay(date ?? undefined));
   }

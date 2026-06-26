@@ -9,6 +9,7 @@
 // never auto-completes. See plans/exercise-snacks.md.
 
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import SnackSuggestionPanel from "@/components/SnackSuggestionPanel";
 import SnackAnimation from "@/components/SnackAnimation";
 import { SnackDayState, routineById } from "@/lib/snack-routines";
@@ -21,6 +22,10 @@ const DAY_START_H = 7;
 const DAY_END_H = 22;
 // A snack becomes "due" within this long after a meal is logged.
 const AFTER_MEAL_MS = 60 * 60 * 1000;
+
+// Live timer (mirror lib/exercise-snacks AUTOSTOP_SEC).
+const AUTOSTOP_SEC = 15 * 60;
+const TIMER_NODIALOG_KEY = "ht-snack-timer-nodialog";
 
 function todayAtHour(h: number): number {
   const d = new Date();
@@ -46,6 +51,12 @@ export default function ExerciseSnacks() {
   const [pendingRoutineId, setPendingRoutineId] = useState<string | null>(null);
   // Re-evaluate "due" as the clock moves, without refetching.
   const [, setTick] = useState(0);
+  // Live timer: clock for the fill ring, the start dialog, and the lead-in count.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  // Briefly shown after stop: the just-finished session's duration (seconds).
+  const [durationSec, setDurationSec] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -76,7 +87,10 @@ export default function ExerciseSnacks() {
   // 60s so the HR pill backfills on its own once the watch syncs.
   useEffect(() => {
     const id = setInterval(() => {
-      if (dayRef.current?.completed.some((e) => e.maxHr === undefined)) load();
+      const d = dayRef.current;
+      const s = d?.session;
+      const partialPending = !!(s && !s.startedAt && s.carrySec > 0 && s.partialAt && s.partialMaxHr === undefined);
+      if (d?.completed.some((e) => e.maxHr === undefined) || partialPending) load();
     }, 60000);
     return () => clearInterval(id);
   }, [load]);
@@ -137,30 +151,110 @@ export default function ExerciseSnacks() {
     [undo]
   );
 
+  // ── live timer ──────────────────────────────────────────────────────────
+  const sessionControl = useCallback(async (action: "start" | "stop", auto = false) => {
+    try {
+      const res = await fetch("/api/exercise-snacks/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, auto }),
+      });
+      if (res.ok) setDay(await res.json());
+    } catch {
+      /* offline */
+    }
+  }, []);
+
+  // Tick the clock once a second while playing (drives the fill ring + counts).
+  const playing = !!day?.session?.startedAt;
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [playing]);
+
+  // The 5-second lead-in countdown, then start the wall-clock.
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown === 0) {
+      setCountdown(null);
+      sessionControl("start");
+      return;
+    }
+    const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [countdown, sessionControl]);
+
+  // Safety: auto-stop a session that's run past the cap (also enforced server-side).
+  const sess = day?.session ?? null;
+  useEffect(() => {
+    if (!playing || !sess?.startedAt) return;
+    const el = sess.carrySec + (Date.now() - Date.parse(sess.startedAt)) / 1000;
+    if (el >= AUTOSTOP_SEC) sessionControl("stop", true);
+  }, [nowTs, playing, sess, sessionControl]);
+
+  const onPlayClick = useCallback(() => {
+    let skip = false;
+    try {
+      skip = localStorage.getItem(TIMER_NODIALOG_KEY) === "1";
+    } catch {
+      /* private mode */
+    }
+    if (skip) setCountdown(5);
+    else setDialogOpen(true);
+  }, []);
+
+  const onStopClick = useCallback(() => {
+    const cur = sess?.startedAt ? sess.carrySec + (Date.now() - Date.parse(sess.startedAt)) / 1000 : 0;
+    setDurationSec(Math.round(cur));
+    setTimeout(() => setDurationSec(null), 3800);
+    sessionControl("stop");
+    // The stop response has no HR yet; nudge a resolve so pills backfill (then
+    // the 60s poll keeps trying until the watch syncs).
+    setTimeout(() => load(), 1500);
+  }, [sess, sessionControl, load]);
+
   if (!day) return null;
 
-  const count = day.completed.length;
   const target = day.target;
+  const session = day.session ?? null;
+
+  // Live elapsed (carry + current run). Minutes pass → more green circles; the
+  // partial fills the current circle's clock ring. `count` is the live visual
+  // count (committed entries + minutes the running timer has filled, not yet
+  // persisted — they commit on stop).
+  const baseCount = day.completed.length;
+  const elapsedSec = session
+    ? session.carrySec + (playing && session.startedAt ? Math.max(0, (nowTs - Date.parse(session.startedAt)) / 1000) : 0)
+    : 0;
+  const timerMin = playing ? Math.floor(elapsedSec / 60) : 0;
+  const ringFrac = playing
+    ? (elapsedSec % 60) / 60
+    : session && session.carrySec >= 2
+      ? (session.carrySec % 60) / 60
+      : 0;
+  const count = baseCount + timerMin;
+
   // Show the target's worth of circles, plus one trailing "next" circle so a
   // bonus snack can always be added (even after the goal is met).
   const slots = Math.max(target, count) + (count >= target ? 1 : 0);
   const metGoal = count >= target;
-  const pendingRoutine = pendingRoutineId ? routineById(pendingRoutineId) : undefined;
+  const pendingRoutine = !playing && pendingRoutineId ? routineById(pendingRoutineId) : undefined;
 
   // Is the NEXT snack overdue? Due time = the earlier of (a) its equal-parts
   // schedule slot, and (b) one hour after the most recent meal logged today (if
-  // nothing's been snacked since that meal). A grabbed/pending snack or a met
-  // goal is never "due" (red).
+  // nothing's been snacked since that meal). Never "due" while playing, pending,
+  // or goal-met. Schedule math uses the committed entries (baseCount).
   const now = Date.now();
   const winStart = todayAtHour(DAY_START_H);
   const winEnd = todayAtHour(DAY_END_H);
   const slot = (winEnd - winStart) / Math.max(target, 1);
-  const scheduleDueAt = winStart + (count + 1) * slot;
-  const lastSnackAt = count > 0 ? Date.parse(day.completed[count - 1].at) : 0;
+  const scheduleDueAt = winStart + (baseCount + 1) * slot;
+  const lastSnackAt = baseCount > 0 ? Date.parse(day.completed[baseCount - 1].at) : 0;
   const mealAt = day.lastMealAt ? Date.parse(day.lastMealAt) : 0;
   const mealDueAt = mealAt && mealAt > lastSnackAt ? mealAt + AFTER_MEAL_MS : Infinity;
   const dueAt = Math.min(scheduleDueAt, mealDueAt);
-  const nextOverdue = !metGoal && !pendingRoutine && now > dueAt;
+  const nextOverdue = !playing && !metGoal && !pendingRoutine && now > dueAt;
 
   return (
     <section
@@ -174,19 +268,52 @@ export default function ExerciseSnacks() {
         padding: "15px 16px",
       }}
     >
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 3, gap: 10 }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 3, gap: 10 }}>
         <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 7 }}>
           <span aria-hidden="true">⚡</span> Exercise snacks <SnackInfo />
         </h2>
-        <span
-          className={celebrate ? "snack-celebrate" : undefined}
-          style={{ fontSize: 13, fontWeight: 700, color: metGoal ? "var(--activity)" : "var(--ink-soft)" }}
-        >
-          {count} / {target}
-        </span>
+        <div className="row" style={{ alignItems: "center", gap: 10 }}>
+          <span
+            className={celebrate ? "snack-celebrate" : undefined}
+            style={{ fontSize: 13, fontWeight: 700, color: metGoal ? "var(--activity)" : "var(--ink-soft)" }}
+          >
+            {count} / {target}
+          </span>
+          <button
+            type="button"
+            aria-label={playing ? "stop the timer" : "start a snack session"}
+            onClick={() => (playing ? onStopClick() : onPlayClick())}
+            className={playing ? "snack-due" : undefined}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: "50%",
+              border: "none",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: playing ? "var(--heart)" : "var(--activity)",
+              color: "#fff",
+              flexShrink: 0,
+            }}
+          >
+            {playing ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5v14l11-7z" fill="currentColor" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
       <div style={{ margin: "0 0 12px", fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.45 }}>
-        {metGoal ? (
+        {playing ? (
+          "Session running — go as hard as you safely can; the circles fill as minutes pass. Hit stop when you're done."
+        ) : metGoal ? (
           `🎉 Goal hit — that's your ${target} breathless minutes for today. Bonus snacks still count.`
         ) : pendingRoutine ? (
           `${pendingRoutine.name} loaded — do your minute, then tap the yellow circle.`
@@ -212,14 +339,19 @@ export default function ExerciseSnacks() {
 
       <div className="row" style={{ columnGap: 9, rowGap: 16, flexWrap: "wrap", alignItems: "center", paddingBottom: 6 }}>
         {Array.from({ length: slots }).map((_, i) => {
-          const filled = i < count;
+          const filled = i < baseCount; // committed entry
+          const isTimerFilled = i >= baseCount && i < count; // green from the running timer
           const isNext = i === count;
-          const interactive = filled || isNext;
+          const interactive = !playing && (filled || isNext);
           const entry = filled ? day.completed[i] : undefined;
           const entryId = entry?.id;
           const maxHr = typeof entry?.maxHr === "number" ? entry.maxHr : null;
+          const showRing = isNext && (playing || ringFrac > 0);
+          // The carried partial circle gets its own HR pill (resolved post-hoc).
+          const partialHr = showRing && !playing && session && typeof session.partialMaxHr === "number" ? session.partialMaxHr : null;
+          const pillHr = maxHr ?? partialHr;
 
-          // Resolve this circle's stoplight state → colors, content, animation.
+          // Resolve this circle's state → colors, content, animation.
           let border: string;
           let background: string;
           let color: string;
@@ -236,6 +368,16 @@ export default function ExerciseSnacks() {
             ) : (
               EMOJIS[i % EMOJIS.length]
             );
+          } else if (isTimerFilled) {
+            border = "1.5px solid var(--activity)";
+            background = "var(--activity-soft)";
+            color = "var(--activity)";
+            content = EMOJIS[i % EMOJIS.length];
+          } else if (isNext && playing) {
+            border = "1.5px solid color-mix(in srgb, var(--activity) 30%, transparent)";
+            background = "var(--bg)";
+            color = "var(--activity)";
+            content = "";
           } else if (isNext && pendingRoutine) {
             border = "1.5px solid var(--food)";
             background = "var(--food-soft)";
@@ -308,15 +450,16 @@ export default function ExerciseSnacks() {
             >
               {content}
             </button>
-            {maxHr !== null && (
+            {showRing && <ClockRing frac={ringFrac} />}
+            {pillHr !== null && (
               <span
-                aria-label={`max heart rate ${maxHr} bpm`}
+                aria-label={`max heart rate ${pillHr} bpm`}
                 style={{
                   position: "absolute",
                   bottom: -7,
                   left: "50%",
                   transform: "translateX(-50%)",
-                  background: hrZone(maxHr),
+                  background: hrZone(pillHr),
                   color: "var(--bg)",
                   fontSize: 9.5,
                   fontWeight: 800,
@@ -329,7 +472,7 @@ export default function ExerciseSnacks() {
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                {maxHr}
+                {pillHr}
               </span>
             )}
             </span>
@@ -374,7 +517,223 @@ export default function ExerciseSnacks() {
         onClose={() => setPanelOpen(false)}
         onGrab={(routineId) => setPendingRoutineId(routineId)}
       />
+
+      <SnackTimerDialog
+        open={dialogOpen}
+        onCancel={() => setDialogOpen(false)}
+        onStart={(dontShowAgain) => {
+          if (dontShowAgain) {
+            try {
+              localStorage.setItem(TIMER_NODIALOG_KEY, "1");
+            } catch {
+              /* private mode */
+            }
+          }
+          setDialogOpen(false);
+          setCountdown(5);
+        }}
+      />
+      {countdown !== null && <CountdownOverlay n={countdown} />}
+      {durationSec !== null && <DurationToast sec={durationSec} onDone={() => setDurationSec(null)} />}
     </section>
+  );
+}
+
+/** Prominent centered "session complete" popup shown briefly after stopping
+ *  (auto-dismisses; tap to close early). Portal so it isn't trapped by the card. */
+function DurationToast({ sec, onDone }: { sec: number; onDone: () => void }) {
+  if (typeof document === "undefined") return null;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  const label = m > 0 ? `${m}m ${s}s` : `${s}s`;
+  return createPortal(
+    <div
+      onClick={onDone}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 300,
+        background: "color-mix(in srgb, var(--bg) 50%, transparent)",
+        backdropFilter: "blur(2px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        className="snack-pop"
+        style={{
+          background: "var(--bg-raised)",
+          border: "1px solid color-mix(in srgb, var(--activity) 45%, transparent)",
+          borderRadius: 20,
+          boxShadow: "var(--shadow)",
+          padding: "26px 36px",
+          textAlign: "center",
+          minWidth: 200,
+        }}
+      >
+        <div style={{ fontSize: 30, lineHeight: 1, marginBottom: 8 }} aria-hidden="true">✅</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)", letterSpacing: 0.2, marginBottom: 4 }}>
+          Session complete
+        </div>
+        <div style={{ fontSize: 42, fontWeight: 800, color: "var(--activity)", lineHeight: 1.05, fontVariantNumeric: "tabular-nums" }}>
+          {label}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/** Clock-style progress ring (fills clockwise from 12 o'clock) over a circle. */
+function ClockRing({ frac }: { frac: number }) {
+  const r = 17.25;
+  const c = 2 * Math.PI * r;
+  const f = Math.max(0, Math.min(1, frac));
+  return (
+    <svg
+      width="38"
+      height="38"
+      viewBox="0 0 38 38"
+      aria-hidden="true"
+      style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+    >
+      <circle
+        cx="19"
+        cy="19"
+        r={r}
+        fill="none"
+        stroke="var(--activity)"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - f)}
+        transform="rotate(-90 19 19)"
+      />
+    </svg>
+  );
+}
+
+/** Full-screen 5→1 lead-in countdown (portal, so the fixed overlay isn't trapped
+ *  by the card's transformed ancestor). */
+function CountdownOverlay({ n }: { n: number }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 300,
+        background: "color-mix(in srgb, var(--bg) 88%, transparent)",
+        backdropFilter: "blur(2px)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+      }}
+    >
+      <div
+        key={n}
+        className="snack-pop"
+        style={{ fontSize: 96, fontWeight: 800, color: "var(--activity)", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}
+      >
+        {n}
+      </div>
+      <div style={{ fontSize: 14, color: "var(--ink-soft)", fontWeight: 600 }}>Get into position…</div>
+    </div>,
+    document.body
+  );
+}
+
+/** Start-session confirmation dialog with a "don't show again" opt-out. */
+function SnackTimerDialog({
+  open,
+  onCancel,
+  onStart,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onStart: (dontShowAgain: boolean) => void;
+}) {
+  const [dontShow, setDontShow] = useState(false);
+  useEffect(() => {
+    if (open) setDontShow(false);
+  }, [open]);
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Start a snack session"
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 300,
+        background: "color-mix(in srgb, var(--bg) 55%, transparent)",
+        backdropFilter: "blur(3px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "var(--bg-raised)",
+          border: "1px solid var(--hairline)",
+          borderRadius: 18,
+          boxShadow: "var(--shadow)",
+          padding: "18px 18px 16px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 700 }}>Start a snack session?</h3>
+        <p style={{ margin: "0 0 9px", fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+          We <strong style={{ color: "var(--ink)" }}>won&rsquo;t show a timer</strong> — that&rsquo;s on purpose, so you
+          focus on doing as much as you physically can, not watching a clock.
+        </p>
+        <ul style={{ margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 7, fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.45 }}>
+          {[
+            "The hardest part is starting. Once you're moving, keep going.",
+            "Don't over-exert — ease off if you feel dizzy, lightheaded, or any chest tightness.",
+            "A 5-second countdown lets you get into position, and we trim 5 seconds when you stop — so no need to rush the start or the stop (rushing is where people get hurt).",
+            "Forget to stop? It auto-stops after 15 minutes, then uses your heart-rate data to estimate when you actually finished.",
+            "Stop anytime — we'll pick up where you left off next time.",
+          ].map((t, i) => (
+            <li key={i} style={{ display: "flex", gap: 7 }}>
+              <span style={{ color: "var(--activity)", flexShrink: 0 }} aria-hidden="true">•</span>
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--ink-soft)", cursor: "pointer", marginBottom: 14 }}>
+          <input type="checkbox" checked={dontShow} onChange={(e) => setDontShow(e.target.checked)} />
+          Don&rsquo;t show this again
+        </label>
+        <div className="row" style={{ gap: 10, justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{ cursor: "pointer", background: "transparent", border: "1px solid var(--hairline)", color: "var(--ink-soft)", borderRadius: 11, padding: "9px 16px", fontSize: 13, fontWeight: 600 }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onStart(dontShow)}
+            style={{ cursor: "pointer", background: "var(--activity)", border: "none", color: "#fff", borderRadius: 11, padding: "9px 18px", fontSize: 13, fontWeight: 700 }}
+          >
+            Start
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 

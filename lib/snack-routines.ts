@@ -89,7 +89,23 @@ export function routineById(id: string): SnackRoutine | undefined {
 
 // ── per-day completion shapes (shared with the API + client) ───────────────
 
-export type SnackSource = "manual" | "auto" | "coach";
+export type SnackSource = "manual" | "auto" | "coach" | "timer";
+
+/** Live "play" session — a hidden wall-clock timer that fills circles minute by
+ *  minute. Persisted so it survives reload/backgrounding; see plans/exercise-snacks.md. */
+export interface SnackSession {
+  /** ISO start of the current run; null = not playing (paused/stopped). */
+  startedAt: string | null;
+  /** Leftover seconds carried into the next run (the partial minute). */
+  carrySec: number;
+  /** Local date the session belongs to (resets across days). */
+  date: string;
+  /** When the carried partial last accrued (the stop time) — anchors its HR. */
+  partialAt?: string | null;
+  /** Post-hoc max HR for the partial circle (like a snack's pill). undefined =
+   *  not resolved yet, null = no HR data, number = bpm. */
+  partialMaxHr?: number | null;
+}
 
 export interface SnackEntry {
   id: string;
@@ -111,4 +127,6 @@ export interface SnackDayState {
   /** ISO time of the most recent meal logged today (for the after-meal "due"
    *  trigger), or null. Computed on read, not stored. */
   lastMealAt?: string | null;
+  /** The live timer session, if any (null when never started today). */
+  session?: SnackSession | null;
 }

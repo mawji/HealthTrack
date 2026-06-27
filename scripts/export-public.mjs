@@ -23,7 +23,8 @@ const outDir = outIdx >= 0 ? args[outIdx + 1] : join(root, "..", "HealthTrack");
 const ALLOW = [
   "app", "components", "lib", "scripts", "public", ".github",
   "package.json", "package-lock.json", "tsconfig.json", "next.config.ts",
-  ".gitignore", ".env.example", "README.md", "LICENSE", "Caddyfile.example",
+  ".gitignore", ".gitattributes", ".env.example", "README.md", "LICENSE",
+  "Caddyfile.example", "install.sh", "install.ps1",
   "docs/readiness-scoring.md",
   // Demo-mode showcase screenshots go here once captured. Real-data
   // screenshots must NEVER be added to this allowlist.

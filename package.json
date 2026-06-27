@@ -19,6 +19,7 @@
     "check": "npm run typecheck && npm run build",
     "preflight": "node scripts/preflight.mjs",
     "update": "node scripts/update.mjs",
+    "upgrade": "node scripts/upgrade.mjs",
     "backup:data": "node scripts/backup-data.mjs",
     "export:public": "node scripts/export-public.mjs"
   },

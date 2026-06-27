@@ -2,25 +2,40 @@
 
 A minimal, mobile-first **personal** health dashboard that runs entirely on your
 own machine. Live wearable data via the **Google Health API**, an app-derived
-**readiness score**, inline and trend **AI insights**, AI food-photo calorie
-logging, custom **habit tracking**, **macro health goals**, manual vitals
-logging, medical-record-aware coaching, and a natural-language **coach that
-logs on your behalf** — all local-first, with your data stored in plain files
-next to the app. Installable as a PWA.
+**readiness score**, inline and trend **AI insights**, AI food logging (photo,
+text, **barcode**, or **USDA**-backed search), custom **habit tracking**,
+**macro health goals**, a **profile** with deterministic nutrition/calorie
+targets, manual vitals logging, **exercise snacks**, a **live workout session**,
+**voice** logging, an **evidence-based, source-traceable coach that learns you**
+and **logs on your behalf**, and an optional **Telegram** front-end — all
+local-first, with your data stored in plain files next to the app. Installable
+as a PWA.
 
 > **Not medical software.** HealthTrack coaches general wellness habits. It does
 > not diagnose, treat, or replace a clinician. Built as a personal project.
 
-## Try it in 60 seconds (demo mode)
+## Install in one line (demo mode)
 
-No accounts, no API keys, no cloud. With [Node.js](https://nodejs.org) 20 or
-newer installed:
+No accounts, no API keys, no cloud. You need [Node.js](https://nodejs.org) 20 or
+newer and `git`. The installer clones the repo, runs first-run setup, and builds
+for production:
+
+**macOS / Linux / WSL / Git Bash**
 
 ```bash
-git clone https://github.com/mawji/HealthTrack.git
-cd HealthTrack
-npm run setup     # installs deps, creates .env.local + data/
-npm run dev       # http://localhost:3210
+curl -fsSL https://raw.githubusercontent.com/mawji/HealthTrack/main/install.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/mawji/HealthTrack/main/install.ps1 | iex
+```
+
+Then start it and open **http://localhost:3210**:
+
+```bash
+cd HealthTrack && npm run start
 ```
 
 With no credentials configured, the app boots straight into **demo mode** —
@@ -28,8 +43,42 @@ realistic, deterministic sample data across every screen (Daily, Fitness,
 Trends, Food, Habits, Coach, Records) so you can explore the whole UI without
 connecting anything.
 
+> **What the installer runs:** it's a small, readable script
+> ([`install.sh`](install.sh) / [`install.ps1`](install.ps1)) — `git clone` →
+> `npm run setup` → `npm run build`. It never starts a server or writes outside
+> the new `HealthTrack/` folder. Piping a remote script to a shell means trusting
+> it; read it first if you'd rather, then run the steps below by hand.
+
+Prefer it fully manual:
+
+```bash
+git clone https://github.com/mawji/HealthTrack.git
+cd HealthTrack
+npm run setup     # checks Node, installs deps, creates .env.local + data/
+npm run build     # production build
+npm run start     # http://localhost:3210
+```
+
+> **Working on the code?** Use `npm run dev` instead of `build` + `start` for a
+> hot-reloading dev server. For just running the app, prefer the production
+> build above — it's faster and is what HealthTrack is meant to run as.
+
 > **Port note:** port 3000 is OS-reserved on some Windows machines, so the app
 > runs on **3210**.
+
+## Upgrading
+
+When this repo moves forward, pull the latest code and rebuild in one command —
+your `.env.local` and `data/` are gitignored and left untouched:
+
+```bash
+npm run upgrade   # git pull (fast-forward) + refresh deps + rebuild
+```
+
+Then restart the app (`npm run start`). `npm run upgrade` pulls fast-forward
+only, so it never rewrites local work — if you've edited tracked files it stops
+and asks you to commit or stash first. (Already have the latest code and just
+want a dependency refresh + rebuild? Use `npm run update`.)
 
 ## Connecting your own data (all optional)
 
@@ -191,19 +240,41 @@ Connect **any one** provider (or none — coaching simply stays off). Set keys i
 - **OpenAI** (API key or ChatGPT-subscription OAuth), **Gemini**,
   **Anthropic Claude**, or local **Ollama** — all configurable in Settings.
 
+**Voice logging** works without any cloud key: the coach mic button transcribes
+on-device with a local Whisper model (Transformers.js, auto-cached to `data/`),
+falling back to `gpt-4o-mini-transcribe` (OpenAI key) only if local transcription
+fails. Mode is configurable (`auto` / `local` / `cloud`).
+
+### Telegram (optional second front-end)
+
+You can run a single self-hosted, owner-only **Telegram bot** as a second face
+to your own coach — chat, log via the same natural-language layer, ask for
+metric cards, send **voice notes**, and receive **proactive nudges** (drink
+water, finish steps, wind down) and daily/weekly self-reports. It's an outbound
+**long-poll bridge** (no inbound webhook, no ports opened): set a bot token in
+**Settings → Telegram**, pair your account, and run `npm run telegram:bridge`
+(plus `npm run proactive:scheduler` for nudges — both auto-start under
+`npm run dev`). You can also share **scoped, default-deny** read-only summaries
+with specific contacts (e.g. a trainer's morning activity report) from
+**Settings → Sharing**, with per-contact consent, expiry, and an audit log.
+Telegram bot messages are not end-to-end encrypted — sharing is opt-in and
+owner-initiated.
+
 ## Features
 
 | Tab / feature | What it does |
 |---|---|
-| **Daily** | Steps goal + zone ring, streak, water, workout card, sleep clock + hypnogram, an app-derived **Readiness score** (HRV/RHR/sleep vs your baseline), heart + key-metric rows, your Daily habits — plus **inline AI insights by section** (movement, readiness, hydration, sleep, nutrition) for the current day only; opt-in **Goals card** surfacing active macro targets at the top |
-| **Fitness** | Workout history with rich capture — type, duration, intensity/effort, soreness, injuries, exercises |
-| **Trends** | Week / month / 90-day / year trends with hover values; **AI summaries per range** (week & month on open, 90-day & year on demand); weight shows latest + low/high; **dynamic metric cards** — a card is added automatically for each active Goal (dashed target overlay) and each manually logged vitals kind |
-| **Food** | Photo or text → AI calorie/macro estimate → edit → log to Google Health; meals logged elsewhere sync back |
+| **Daily** | Steps goal + zone ring, streak, water, workout card, sleep clock + hypnogram, an app-derived **Readiness score** (HRV/RHR/sleep vs your baseline), heart + key-metric rows, your Daily habits, and a pinned **Exercise Snacks** row — plus **inline AI insights by section** (movement, readiness, hydration, sleep, nutrition) for the current day only; opt-in **Goals card** surfacing active macro targets at the top |
+| **Fitness** | Workout history with rich capture — type, duration, intensity/effort, soreness, injuries, exercises; a **live "Start a workout" session** (running timer, in-session per-set logging from the wger library, pause/resume/finish, reconcile against a watch-tracked session on finish); a **Training Plan** of upcoming workouts (plan / complete / skip, auto-completed when a matching workout appears); and the Exercise Snacks row |
+| **Trends** | Week / month / 90-day / year trends with hover values; **AI summaries per range** (week & month on open, 90-day & year on demand); weight shows latest + low/high; **dynamic metric cards** — a card is added automatically for each active Goal (dashed target overlay), each manually logged vitals kind, and a calorie-target band on "calories in" |
+| **Food** | **Photo, text, barcode scan, or USDA food search** → calorie/macro estimate → edit → log to Google Health. Source-backed entries carry a **provenance badge** (USDA FoodData Central / Open Food Facts / AI estimate) and a cited **glycemic index / load** where known; meals logged elsewhere sync back |
 | **Habits** | Create custom **boost/avoid** habits (targets, units, icons), log daily, track streaks; surfaced on Daily and in coach context; avoid habits have "Nailed it / I slipped" buttons |
+| **Exercise Snacks** | A row of ~9 "breathless minute" circles (the *10 breathless minutes* reframe of 10k steps), pinned on Daily and Fitness; tap a glowing circle to count a snack, with a **suggestion sheet** of anywhere-doable routines and animated demo figures. Resets per local day; logged through the coach and surfaced in its context |
+| **Profile** | Sex / DOB / height / weight / activity / goal → deterministic **BMI + category**, healthy-weight range, and **daily calorie + macro/hydration targets** (Mifflin-St Jeor, goal-adjusted, safety-capped). The coach treats these targets as authoritative |
 | **Goals** | Set macro health targets (weight, steps, RHR, sleep, fasting glucose, HbA1c, lipids) with deterministic **met / on-track / needs attention** status and progress bars; coach sees all active goals as authoritative context; reach via sidebar on desktop or profile menu on mobile |
-| **+ Log** | Floating pill button (desktop) / circle FAB (mobile) — quick-entry popup for **Weight, Glucose, Body temp, Body fat, Sleep**; routes Activity / Food / Hydration to their existing screens. Weight and body-fat sync to Google Health automatically |
+| **+ Log** | Floating pill button (desktop) / circle FAB (mobile) — quick-entry popup for **Weight, Glucose, Body temp, Body fat, Muscle mass, Blood pressure, Sleep**; routes Activity / Food / Hydration to their existing screens. Weight and body-fat sync to Google Health automatically |
 | **Journal** | View, edit, and delete all hand-logged measurements (newest-first); reach from sidebar / profile menu |
-| **Coach** | Streaming chat with inline charts; logs **workouts, water, food, and habits** from natural language; sees your readiness score, active goals, recent manual measurements, and uploaded records as context |
+| **Coach** | Streaming chat with inline charts and **persistent conversation history**; logs **workouts, water, food, habits, exercise snacks, and planned workouts** from natural language; **voice input** (mic button → on-device Whisper, cloud fallback); an **evidence-based, source-traceable** mode (USDA / ODPHP / CDC / AHA / GI tables — each recommendation can show its source, metric, and last-reviewed date) with a conservative, clinician-framed health review; and a **memory that learns you** (durable, editable facts — see the **Memory** page). Sees your readiness score, profile targets, active goals, recent measurements, and uploaded records as context |
 | **Records** | Upload PDFs/photos/text; AI extracts + summarizes; coach uses them as context |
 
 ## Scripts
@@ -218,7 +289,10 @@ Connect **any one** provider (or none — coaching simply stays off). Set keys i
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run check` | Typecheck **and** build |
 | `npm run preflight` | Verify Node, deps, and that port 3210 is free |
-| `npm run update` | Refresh dependencies + rebuild (leaves `.env.local` and `data/` untouched) |
+| `npm run upgrade` | Pull the latest code (fast-forward) **then** refresh deps + rebuild — the command to run when this repo has progressed |
+| `npm run update` | Refresh dependencies + rebuild without pulling (leaves `.env.local` and `data/` untouched) |
+| `npm run telegram:bridge` | Long-poll bridge for the optional owner Telegram bot (auto-starts under `dev`) |
+| `npm run proactive:scheduler` | Deterministic proactive-nudge scheduler for Telegram (auto-starts under `dev`) |
 | `npm run backup:data` | Timestamped copy of `data/` into `backups/` |
 
 ### Viewing on your phone
@@ -309,12 +383,17 @@ no third-party hosting.
 - **Next.js 15 (App Router) + React 19**, TypeScript, no UI framework — the
   design system is ~200 lines of CSS variables.
 - API routes under `app/api/*`: `googlehealth/*` (OAuth 2.0 + PKCE,
-  auto-refresh), `health` (aggregation + demo fallback), `food/*`, `water`,
-  `workouts`, `habits/*`, `goals` (macro health targets CRUD + progress),
-  `measurements` (manual vitals log + Google Health write-back),
+  auto-refresh), `health` (aggregation + demo fallback), `food/*`
+  (analyze / search / barcode / log), `water`, `workouts`, `workout-plans`
+  (training plan), `workout-session` (live session), `exercise-snacks`,
+  `exercise-library` (wger), `habits/*`, `goals` (macro health targets CRUD +
+  progress), `profile` + `nutrition/targets` (deterministic calorie/macro
+  targets), `measurements` (manual vitals log + Google Health write-back),
   `devices` (paired device list + local relabelling), `daily-insights`
-  (today's section insights + readiness), `chat` (streaming coach +
-  natural-language logging), `coach/insights` (Trends range summaries), `records`.
+  (today's section insights + readiness), `transcribe` (local-first voice),
+  `chat` (streaming coach + natural-language logging), `coach/*`
+  (insights / memory / conversations / questions), `telegram/*` + `proactive/*`
+  (optional owner bot, nudges, scoped sharing), `records`.
 - The **readiness score** is derived in `lib/readiness.ts` (HRV/RHR/sleep vs a
   personal rolling baseline — see
   [`docs/readiness-scoring.md`](docs/readiness-scoring.md)); the deterministic
@@ -324,6 +403,16 @@ no third-party hosting.
   `lib/measurements.ts` manages hand-logged vitals and the Google Health
   write-back (weight + body-fat only — the API rejects create for other types).
   `lib/devices.ts` reads paired devices and applies local display-name overrides.
+- `lib/profile.ts` + `lib/coach/nutrition-targets.ts` hold the profile store and
+  the deterministic Mifflin-St Jeor → TDEE → goal-adjusted target math;
+  `lib/evidence/` + `lib/coach/*` carry the source-traceable coaching rules
+  (exercise, prevention, evidence cards), with food provenance from `lib/usda.ts`,
+  `lib/openfoodfacts.ts`, and `lib/glycemic-index.ts`. `lib/training-plan.ts`,
+  `lib/workout-session.ts`, `lib/exercise-library.ts` (wger), and
+  `lib/exercise-snacks.ts` + `lib/snack-routines.ts` back the Fitness surfaces;
+  `lib/transcribe.ts` does local-first voice; `lib/telegram/*` and
+  `lib/proactive/*` power the optional Telegram channel (the `filterForContact`
+  choke point in `lib/telegram/sharing.ts` is default-deny).
 - `lib/googlehealth.ts` is the only file that talks to the Google Health API;
   the AI provider layer in `lib/ai-provider.ts` is the only one that talks to
   the models. `lib/demo.ts` generates the demo-mode dataset.

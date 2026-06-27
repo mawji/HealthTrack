@@ -46,5 +46,6 @@ if (!existsSync(dataDir)) {
   log("created data/ directory");
 }
 
-log("done. Run `npm run dev` and open http://localhost:3210");
+log("done. Run `npm run build` then `npm run start`, and open http://localhost:3210");
+log("(Or `npm run dev` for a hot-reloading dev server if you're modifying the code.)");
 log("No credentials? The app boots into demo mode with realistic sample data.");

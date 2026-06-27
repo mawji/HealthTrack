@@ -1,0 +1,4 @@
+# This is a Windows/CRLF working tree, but shell scripts are piped to `sh`
+# (`curl … | sh`) and MUST keep LF endings — a trailing \r breaks the shebang
+# and every line on Linux/macOS. Force LF for them regardless of core.autocrlf.
+*.sh text eol=lf

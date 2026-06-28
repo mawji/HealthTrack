@@ -19,7 +19,7 @@ jobs:
         # and must compile on each.
         node-version: ["20.x", "22.x", "24.x"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Use Node ${{ matrix.node-version }}
         uses: actions/setup-node@v6
@@ -39,7 +39,7 @@ jobs:
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history so the scan covers every commit
 
@@ -54,7 +54,7 @@ jobs:
     # not block the build.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "22.x"

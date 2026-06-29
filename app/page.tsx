@@ -25,6 +25,8 @@ import {
 import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
 import ExerciseSnacks from "@/components/ExerciseSnacks";
+import MedicationsWidget from "@/components/MedicationsWidget";
+import MedicationAlert from "@/components/MedicationAlert";
 import CoachQuestionCard from "@/components/CoachQuestionCard";
 import type { WorkoutPlanItem } from "@/lib/training-plan";
 import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
@@ -513,6 +515,7 @@ export default function Daily() {
       </header>
 
       {isToday && <CoachQuestionCard />}
+      {isToday && <MedicationAlert />}
 
       <div className="stack desk-grid">
         {isToday && <ExerciseSnacks />}
@@ -847,6 +850,8 @@ export default function Daily() {
           onLog={logHabit}
           onReorder={reorderHabits}
         />
+
+        <MedicationsWidget date={shownDate} />
 
         <h2 className="section-title desk-span rise rise-3">Sleep</h2>
 

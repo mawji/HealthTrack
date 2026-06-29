@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasAiKey, parseJsonReply } from "@/lib/openrouter";
 import { completeWithFallback } from "@/lib/ai-provider";
+import { decomposeAndResolve } from "@/lib/food-decompose";
 import { FoodAnalysis } from "@/lib/types";
 
 const JSON_SHAPE = `Reply with ONLY a JSON object, no prose:
@@ -27,6 +28,22 @@ export async function POST(req: NextRequest) {
   const description = typeof note === "string" ? note.trim() : "";
   if (!hasImage && !description) {
     return NextResponse.json({ error: "Send a photo or a description." }, { status: 400 });
+  }
+
+  // Preferred path: decompose the plate into components and resolve each against
+  // USDA FoodData Central (reference-grade macro density). Falls through to the
+  // single-shot whole-plate estimate below if decomposition fails entirely.
+  try {
+    const { analysis, usedSecondary, servedLabel } = await decomposeAndResolve({
+      image: hasImage ? image : undefined,
+      note: description || undefined,
+    });
+    return NextResponse.json(
+      analysis,
+      usedSecondary ? { headers: { "X-AI-Fallback": servedLabel } } : undefined
+    );
+  } catch (e) {
+    console.warn("Composite analysis failed, falling back to single-shot estimate:", e);
   }
 
   let prompt: string;

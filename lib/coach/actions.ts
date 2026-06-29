@@ -69,9 +69,14 @@ export async function runAction(spec: any): Promise<string> {
         glycemicLoad: spec.glycemicLoad,
         loggedAt: spec.loggedAt,
         notes: spec.notes,
+        // Upgrade the model's inline estimate via decompose + USDA resolution
+        // server-side; the estimate stays as the fallback if no match.
+        resolveComposite: true,
       });
+      const usda = saved.provenance?.source === "fdc" || saved.provenance?.source === "composite";
       return (
         `${saved.name} · ${saved.calories} kcal` +
+        (usda ? " · USDA-matched" : "") +
         (saved.syncedToHealth ? " · synced to Google Health" : " · saved")
       );
     }
@@ -104,6 +109,17 @@ export async function runAction(spec: any): Promise<string> {
         source: "coach",
       });
       return `snack ${state.completed.length} of ${state.target} today`;
+    }
+    case "logMedication": {
+      const { record } = await postJson("/api/medications/record", {
+        medicationId: spec.medicationId,
+        date: spec.date,
+        doseIndex: spec.doseIndex,
+        status: spec.status === "skipped" ? "skipped" : "taken",
+        note: spec.note,
+      });
+      if (!record) throw new Error("no matching medication");
+      return `${spec.medicationId} · ${record.status}`;
     }
     case "rememberFact": {
       const m = await postJson("/api/coach/memory", {

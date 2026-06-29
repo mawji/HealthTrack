@@ -122,12 +122,17 @@ function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: st
               glycemicLoad: spec.glycemicLoad,
               loggedAt: spec.loggedAt,
               notes: spec.notes,
+              // Upgrade the model's inline estimate via decompose + USDA resolution
+              // server-side; the estimate stays as the fallback if no match.
+              resolveComposite: true,
             }),
           });
           if (!res.ok) throw new Error(`(${res.status})`);
           const saved = await res.json();
+          const usda = saved.provenance?.source === "fdc" || saved.provenance?.source === "composite";
           setDetail(
             `${saved.name} · ${saved.calories} kcal` +
+              (usda ? " · USDA-matched" : "") +
               (saved.syncedToHealth ? " · synced to Google Health" : " · saved")
           );
         } else if (spec.action === "logHabit") {
@@ -177,6 +182,22 @@ function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: st
           if (!res.ok) throw new Error(`(${res.status})`);
           const state = await res.json();
           setDetail(`snack ${state.completed.length} of ${state.target} today`);
+        } else if (spec.action === "logMedication") {
+          const res = await fetch("/api/medications/record", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              medicationId: spec.medicationId,
+              date: spec.date,
+              doseIndex: spec.doseIndex,
+              status: spec.status === "skipped" ? "skipped" : "taken",
+              note: spec.note,
+            }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const { record } = await res.json();
+          if (!record) throw new Error("no matching medication");
+          setDetail(`${spec.medicationId} · ${record.status}`);
         } else if (spec.action === "rememberFact") {
           setMemVerb("Remembered");
           const res = await fetch("/api/coach/memory", {

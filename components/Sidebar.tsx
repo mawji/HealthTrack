@@ -7,11 +7,13 @@ import { NAV_ITEMS } from "./navItems";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
 import { useOpenQuestion } from "./useOpenQuestion";
+import { useMedsAlert } from "./useMedsAlert";
 
 /** Desktop sidebar — Apple-Health-style category list with colored icons. */
 export default function Sidebar() {
   const pathname = usePathname();
   const { open } = useOpenQuestion();
+  const { lowCount } = useMedsAlert();
   return (
     <aside className="sidebar">
       <div className="wordmark">
@@ -37,6 +39,28 @@ export default function Sidebar() {
               aria-label="a question from your coach"
               style={{ marginLeft: "auto", width: 9, height: 9, borderRadius: "50%", background: "var(--breath)", flex: "none" }}
             />
+          )}
+          {lowCount > 0 && t.href === "/medications" && (
+            <span
+              aria-label="medications running low"
+              style={{
+                marginLeft: "auto",
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                borderRadius: 9,
+                background: "var(--heart)",
+                color: "var(--bg)",
+                fontSize: 11,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: "none",
+              }}
+            >
+              {lowCount}
+            </span>
           )}
         </Link>
       ))}

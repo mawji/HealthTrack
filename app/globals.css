@@ -956,6 +956,37 @@ select.field:focus {
 :root[data-theme="dark"] .prox-field { color-scheme: dark; }
 :root[data-theme="light"] .prox-field { color-scheme: light; }
 
+/* Bind native form controls (date/time pickers, selects) to the app theme so
+   their built-in icons stay legible in dark mode (otherwise dark-on-dark). */
+:root[data-theme="dark"] .field { color-scheme: dark; }
+:root[data-theme="light"] .field { color-scheme: light; }
+
+/* Bottom-sheet on mobile, centered modal on desktop. Shared by the medications
+   editor + info popups so a drawer doesn't look stranded on a wide screen. */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ink) 38%, transparent);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.sheet-panel {
+  width: min(560px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+@media (min-width: 900px) {
+  .sheet-overlay { align-items: center; padding: 20px; }
+  .sheet-panel { max-height: 88vh; border-radius: 18px; padding-bottom: 18px; }
+}
+
 /* ── Digit Panel (ChatGPT OAuth) ── */
 .digit-container {
   display: flex;

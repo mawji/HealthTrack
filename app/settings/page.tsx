@@ -812,6 +812,8 @@ export default function Settings() {
               </div>
               <span style={{ fontWeight: 600, fontSize: 14 }}>{data.timezone}</span>
             </div>
+
+            <MedInventoryPref />
           </div>
         </section>
 
@@ -1359,6 +1361,41 @@ function Row({ k, v }: { k: string; v: string }) {
     <div className="row" style={{ justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--hairline)" }}>
       <span style={{ color: "var(--ink-soft)" }}>{k}</span>
       <span style={{ fontWeight: 600, textAlign: "right" }}>{v}</span>
+    </div>
+  );
+}
+
+/** Inventory-tracking toggle for medications (lives in App Preferences). When
+ *  off, supply counts aren't deducted and low-stock reminders/badges are
+ *  suppressed. Self-contained: reads/writes /api/medications/settings. */
+function MedInventoryPref() {
+  const [on, setOn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/medications/settings").then((r) => r.json()).then((s) => setOn(!!s.inventoryEnabled)).catch(() => {});
+  }, []);
+
+  async function toggle() {
+    const next = !on;
+    setOn(next);
+    await fetch("/api/medications/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inventoryEnabled: next }),
+    }).catch(() => {});
+    try { window.dispatchEvent(new Event("ht-meds-changed")); } catch {}
+  }
+
+  if (on === null) return null;
+  return (
+    <div className="row" style={{ justifyContent: "space-between", background: "var(--bg-inset)", padding: "12px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 12 }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Medication supply tracking</span>
+        <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Count down pills as you take them and remind you to refill when low.</span>
+      </div>
+      <button className={on ? "btn" : "btn btn-ghost"} onClick={toggle}>
+        {on ? "On" : "Off"}
+      </button>
     </div>
   );
 }

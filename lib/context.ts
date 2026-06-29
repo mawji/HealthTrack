@@ -36,6 +36,13 @@ import {
   computeHabitStatus,
   formatHabitForCoach,
 } from "./habits";
+import {
+  getMedications,
+  getMedicationRecords,
+  computeMedicationStatus,
+  formatMedicationForCoach,
+} from "./medications";
+import { localNowParts } from "./medication-reminders";
 import { getProfile, deriveProfile, ACTIVITY_LABELS, GOAL_LABELS } from "./profile";
 import { formatEvidenceForCoach } from "./evidence";
 import { formatMemoryForCoach } from "./memory";
@@ -537,6 +544,28 @@ export async function buildCoachContext(days = 14, query?: string): Promise<{ te
     lines.push("", formatSnacksForCoach(dateKey(0)));
   } catch {
     // snacks are optional context
+  }
+
+  // Medications & supplements the user tracks — schedule, today's taken/skipped,
+  // criticality, and recent adherence. The coach stays conservative: timing &
+  // lifestyle notes only, never dosing/interaction advice (see lib/medications.ts
+  // + plans/medications-tracking.md). Loggable ids let it run logMedication.
+  try {
+    const { date: today, nowMin } = localNowParts();
+    const medRecords = getMedicationRecords();
+    const meds = getMedications().filter((m) => m.active);
+    if (meds.length) {
+      lines.push("", "== Medications (today) ==");
+      for (const m of meds) {
+        lines.push(formatMedicationForCoach(m, computeMedicationStatus(m, medRecords, today, today, nowMin)));
+      }
+      lines.push(`logMedication ids: ${meds.map((m) => m.id).join(", ")}`);
+      lines.push(
+        "Note: log adherence only against these ids; never invent one. Give timing/lifestyle guidance only — never dosing, interaction diagnoses, or start/stop advice; defer those to a clinician."
+      );
+    }
+  } catch {
+    // medications are optional context
   }
 
   // User-set macro goals (coach-visible only), with deterministic status. The

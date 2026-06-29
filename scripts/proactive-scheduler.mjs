@@ -16,7 +16,8 @@ const CONFIG_PATH = path.join(ROOT, "data", "telegram", "config.json");
 const STATE_PATH = path.join(ROOT, "data", "proactive", "scheduler-state.json");
 const APP_BASE = process.env.APP_BASE_URL || "http://127.0.0.1:3210";
 
-const EVAL_INTERVAL_MS = 15 * 60 * 1000; // evaluate nudges every 15 min
+const BASE_INTERVAL_MS = 5 * 60 * 1000; // base loop: 5 min (med reminders need this granularity)
+const PROACTIVE_EVERY = 3; // run the anti-nag proactive cycle every 3rd tick (~15 min)
 const REPORT_HOUR = Number(process.env.PROACTIVE_REPORT_HOUR ?? 8); // local hour for the daily report
 const TZ = process.env.APP_TZ || "Asia/Dubai";
 
@@ -63,35 +64,46 @@ function localParts() {
   return { date: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
 }
 
-async function tick() {
-  // Nudges: let the engine decide; it no-ops when disabled/quiet/capped.
-  const res = await post("/api/proactive/evaluate");
-  if (res?.sent) console.log(`[proactive-scheduler] nudge sent: ${res.chosen?.id}`);
+async function tick(count) {
+  // Medication reminders: time-anchored, must-deliver — run EVERY tick (5 min)
+  // so an "at 11:00" dose (± lead time) fires promptly. The endpoint no-ops when
+  // reminders are disabled and de-dupes its own sends.
+  const med = await post("/api/medications/tick");
+  if (med?.sent) console.log(`[proactive-scheduler] med reminders sent: ${med.sent}`);
 
-  // Scheduled per-contact reports (#24): the endpoint sends only those due now.
-  const cr = await post("/api/telegram/contact-reports");
-  if (cr?.sent) console.log(`[proactive-scheduler] contact reports sent: ${cr.sent}`);
+  // The anti-nag proactive cycle is coarser — only every ~15 min.
+  if (count % PROACTIVE_EVERY === 0) {
+    // Nudges: let the engine decide; it no-ops when disabled/quiet/capped.
+    const res = await post("/api/proactive/evaluate");
+    if (res?.sent) console.log(`[proactive-scheduler] nudge sent: ${res.chosen?.id}`);
 
-  // Daily report: once per local day, at/after the report hour.
-  const { date, hour } = localParts();
-  const state = readJson(STATE_PATH, { lastReportDate: null });
-  if (hour >= REPORT_HOUR && state.lastReportDate !== date) {
-    const r = await post("/api/proactive/report");
-    if (r?.sent) {
-      writeJson(STATE_PATH, { lastReportDate: date });
-      console.log(`[proactive-scheduler] daily report sent for ${date}`);
-    } else if (r && r.reason) {
-      // Disabled/unpaired: mark the day done anyway so we don't retry all day.
-      writeJson(STATE_PATH, { lastReportDate: date });
+    // Scheduled per-contact reports (#24): the endpoint sends only those due now.
+    const cr = await post("/api/telegram/contact-reports");
+    if (cr?.sent) console.log(`[proactive-scheduler] contact reports sent: ${cr.sent}`);
+
+    // Daily report: once per local day, at/after the report hour.
+    const { date, hour } = localParts();
+    const state = readJson(STATE_PATH, { lastReportDate: null });
+    if (hour >= REPORT_HOUR && state.lastReportDate !== date) {
+      const r = await post("/api/proactive/report");
+      if (r?.sent) {
+        writeJson(STATE_PATH, { lastReportDate: date });
+        console.log(`[proactive-scheduler] daily report sent for ${date}`);
+      } else if (r && r.reason) {
+        // Disabled/unpaired: mark the day done anyway so we don't retry all day.
+        writeJson(STATE_PATH, { lastReportDate: date });
+      }
     }
   }
 }
 
 async function main() {
-  console.log(`[proactive-scheduler] running (every ${EVAL_INTERVAL_MS / 60000} min, report ~${REPORT_HOUR}:00 ${TZ})`);
+  console.log(`[proactive-scheduler] running (base ${BASE_INTERVAL_MS / 60000} min; proactive every ${PROACTIVE_EVERY}× , report ~${REPORT_HOUR}:00 ${TZ})`);
+  let count = 0;
   for (;;) {
-    await tick();
-    await sleep(EVAL_INTERVAL_MS);
+    await tick(count);
+    count++;
+    await sleep(BASE_INTERVAL_MS);
   }
 }
 

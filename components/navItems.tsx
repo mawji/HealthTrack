@@ -73,6 +73,17 @@ export const NAV_ITEMS = [
     ),
   },
   {
+    href: "/medications",
+    label: "Meds",
+    color: "var(--heart)",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-40 12 12)" />
+        <path d="M8.6 8.4l7 7" />
+      </svg>
+    ),
+  },
+  {
     href: "/coach",
     label: "Coach",
     color: "var(--breath)",

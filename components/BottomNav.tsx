@@ -8,8 +8,8 @@ import { useOpenQuestion } from "./useOpenQuestion";
 export default function BottomNav() {
   const pathname = usePathname();
   const { open } = useOpenQuestion();
-  // Records, Goals, Journal and Memory live in the avatar menu on mobile to keep the bar uncramped.
-  const HIDDEN = new Set(["/records", "/goals", "/journal", "/memory"]);
+  // Records, Goals, Journal, Memory and Meds live in the avatar menu on mobile to keep the bar uncramped.
+  const HIDDEN = new Set(["/records", "/goals", "/journal", "/memory", "/medications"]);
   return (
     <nav className="bottom-nav">
       {NAV_ITEMS.filter((t) => !HIDDEN.has(t.href)).map((t) => (

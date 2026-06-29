@@ -82,7 +82,7 @@ export type MealType = "breakfast" | "lunch" | "dinner" | "other";
 // is the shared "show the source + confidence" affordance the evidence-coach
 // build reuses across barcode (Open Food Facts), USDA FDC, label, user, and
 // model paths. Built first for Track A (barcode); Phase 4 extends it for FDC.
-export type NutritionSource = "photo" | "text" | "barcode" | "fdc" | "label" | "user" | "model";
+export type NutritionSource = "photo" | "text" | "barcode" | "fdc" | "label" | "user" | "model" | "composite";
 
 export interface FoodProvenance {
   source: NutritionSource;
@@ -100,6 +100,24 @@ export interface FoodProvenance {
   allergens?: string[];
 }
 
+// One resolved ingredient/dish in a composite meal. The hybrid analyzer
+// decomposes a plate into components, then resolves each against USDA FoodData
+// Central (macro DENSITY is reference-grade) or keeps the model estimate when no
+// match is found. `per100g`/`fdcId` are present only for USDA-backed components —
+// they let the composer rescale a component when its portion is edited.
+export interface FoodComponent {
+  name: string;
+  portionG: number; // grams of THIS component in the meal (editable estimate)
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  glycemicLoad?: number; // GI-based when the component has a curated GI, else model estimate
+  per100g?: { calories: number; proteinG: number; carbsG: number; fatG: number };
+  fdcId?: number; // USDA FoodData Central id when source-backed
+  provenance: FoodProvenance; // per-component source: "fdc" (USDA) or "photo"/"text" (AI estimate)
+}
+
 export interface FoodEntry {
   id: string;
   loggedAt: string; // ISO
@@ -114,6 +132,7 @@ export interface FoodEntry {
   notes?: string;
   photo?: string; // small data-URL thumbnail of the analyzed photo
   provenance?: FoodProvenance; // source/confidence of the macros (barcode, FDC, …)
+  components?: FoodComponent[]; // per-ingredient breakdown when logged via the composite analyzer
   syncedToHealth: boolean; // written back to Google Health
   googleName?: string | null; // dataPoint resource name when synced — provenance key
 }
@@ -128,6 +147,7 @@ export interface FoodAnalysis {
   confidence: "low" | "medium" | "high";
   notes: string;
   provenance?: FoodProvenance; // set on barcode/FDC paths; absent for pure model estimates
+  components?: FoodComponent[]; // per-ingredient breakdown from the composite analyzer
 }
 
 export type LabFlag = "normal" | "high" | "low" | "abnormal" | "critical";
@@ -410,6 +430,136 @@ export interface ProfileDerived {
 export interface ProfilePayload {
   profile: UserProfile;
   derived: ProfileDerived;
+}
+
+// ── Medications & supplements ───────────────────────────────────────────────
+// Local-only tracker for daily meds/supplements: definitions + per-dose
+// adherence, time-anchored reminders (Telegram + Daily), and a generated-once
+// research note sourced from authoritative drug databases. Never synced to
+// Google Health and excluded from every cloud/social aggregate (meds are
+// sensitive). Mirrors the configurable-habits template. See
+// plans/medications-tracking.md.
+
+export type MedicationKind = "medication" | "supplement";
+export type MedicationFrequency = "daily" | "specific_days" | "as_needed";
+export type MedicationStatus = "taken" | "skipped";
+
+export interface MedicationSchedule {
+  frequency: MedicationFrequency;
+  daysOfWeek?: number[]; // 0=Sun … 6=Sat, used by specific_days
+  times: string[]; // "HH:mm" local dose times (empty ⇒ one untimed dose / as_needed)
+}
+
+/** Per-med reminder behavior. Overrides the global defaults in the settings
+ *  store. leadMinutes lists how long BEFORE each dose time to remind (0 = at
+ *  the time itself), e.g. [15, 0]. */
+export interface MedicationReminderSettings {
+  enabled: boolean;
+  leadMinutes: number[];
+}
+
+/** Generated-once research note. AI maps the user's brand name → active
+ *  ingredient; the section text is distilled STRICTLY from authoritative source
+ *  text (openFDA / MedlinePlus / NIH ODS) with the sources cited — never
+ *  invented. `error` is set (and sections left empty) when no reliable source
+ *  was found, so the UI can say so instead of showing fabricated facts. */
+export interface MedicationInfo {
+  genericName: string | null;
+  sections: {
+    purpose?: string;
+    usage?: string;
+    dosage?: string;
+    sideEffects?: string;
+    cautions?: string;
+  };
+  sources: { name: string; url: string }[];
+  disclaimer: string;
+  retrievedAt: string; // ISO
+  error?: string;
+}
+
+/** One active component of a (possibly combination) medication, each with its
+ *  own strength — e.g. Xigduo XR = dapagliflozin 5 mg + metformin 1000 mg. */
+export interface MedicationIngredient {
+  name: string; // active ingredient, generic name
+  strength?: string; // e.g. "5 mg", "1000 mg" — display only
+}
+
+export interface MedicationDefinition {
+  id: string;
+  name: string; // brand / name as the user knows it
+  kind: MedicationKind;
+  strength?: string; // single-ingredient display, e.g. "5 mg" — NOT clinically validated
+  ingredients?: MedicationIngredient[]; // active components for combination meds
+  quantity?: number; // units per dose, e.g. 1
+  unit?: string; // "tablet" | "capsule" | "ml" | "IU" | … (freeform)
+  form?: string;
+  nickname?: string; // 1-3 char abbreviation shown in the pill box, e.g. "BP", "VD"
+  withFood?: boolean;
+  notes?: string;
+  schedule: MedicationSchedule;
+  critical: boolean; // must-take: reminders re-nudge until taken + bypass quiet hours
+  reminders: MedicationReminderSettings;
+  info?: MedicationInfo; // cached research note (generated once, refreshable)
+  inventory?: MedicationInventory; // current supply on hand; undefined = not tracked
+  active: boolean; // archived meds keep history but drop off Daily/reminders
+  sortOrder?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Current supply on hand for a med. Auto-deducted as doses are taken (by the
+ *  per-dose quantity); the user tops it up when they restock. */
+export interface MedicationInventory {
+  units: number; // remaining units (tablets/capsules/ml…)
+  updatedAt: string; // ISO
+}
+
+export interface MedicationRecord {
+  id: string;
+  medicationId: string;
+  date: string; // yyyy-MM-dd in APP_TZ
+  doseIndex: number; // which scheduled time (index into schedule.times); 0 for untimed/as_needed
+  status: MedicationStatus;
+  takenAt?: string; // ISO, when marked taken
+  note?: string;
+}
+
+export interface MedicationDoseStatus {
+  doseIndex: number;
+  time: string | null; // "HH:mm" scheduled time, or null for an untimed dose
+  status: MedicationStatus | null; // null ⇒ pending
+  overdue: boolean; // scheduled time passed today and still pending
+}
+
+export interface MedicationDayStatus {
+  medicationId: string;
+  date: string;
+  scheduledToday: boolean; // does the schedule call for this med on `date`
+  asNeeded: boolean;
+  doses: MedicationDoseStatus[];
+  takenCount: number;
+  scheduledCount: number;
+  adherence7d: number | null; // % of scheduled doses taken over the trailing 7 days
+}
+
+export interface MedicationsPayload {
+  date: string;
+  medications: MedicationDefinition[];
+  records: MedicationRecord[]; // records for the requested date
+  status: MedicationDayStatus[];
+}
+
+/** Global reminder defaults + critical-dose escalation knobs (one store). */
+export interface MedicationSettings {
+  remindersEnabled: boolean; // master switch (opt-in)
+  defaultLeadMinutes: number[]; // seeded onto new meds
+  renudgeMinutes: number; // gap between re-nudges for a missed critical dose
+  maxRenudges: number; // cap on re-nudges per missed critical dose
+  criticalBypassQuietHours: boolean;
+  quietStartMin: number; // local minutes; non-critical reminders suppressed in [start,end)
+  quietEndMin: number;
+  inventoryEnabled: boolean; // track supply counts + low-stock reminders
 }
 
 export interface ChatMessage {

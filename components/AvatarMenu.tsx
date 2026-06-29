@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useMedsAlert } from "./useMedsAlert";
 
 /** The five logo bars, shared with Logo.tsx geometry (viewBox 0 0 56 50). */
 const BARS = [
@@ -21,6 +22,7 @@ export default function AvatarMenu() {
   const [open, setOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [user, setUser] = useState<{ name: string; picture: string }>({ name: "", picture: "" });
+  const { lowCount } = useMedsAlert();
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then(setUser).catch(() => {});
@@ -99,6 +101,21 @@ export default function AvatarMenu() {
             initial
           )}
         </span>
+        {lowCount > 0 && !isDesktop && (
+          <span
+            aria-label="medications running low"
+            style={{
+              position: "absolute",
+              top: -1,
+              right: -1,
+              width: 11,
+              height: 11,
+              borderRadius: "50%",
+              background: "var(--heart)",
+              border: "2px solid var(--bg)",
+            }}
+          />
+        )}
       </button>
 
       {open && (
@@ -137,6 +154,11 @@ export default function AvatarMenu() {
                   <path d="M4 19.5l1-3.6L15.4 5.5l2.6 2.6L7.6 18.5z" /><path d="M13.6 7.3l2.6 2.6" /><path d="M4 21h16" />
                 </svg>
               } />
+              <MenuLink href="/medications" label="Meds" badge={lowCount} onClick={() => setOpen(false)} icon={
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-40 12 12)" /><path d="M8.6 8.4l7 7" />
+                </svg>
+              } />
               <MenuLink href="/memory" label="Memory" onClick={() => setOpen(false)} icon={
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 3.5a4.5 4.5 0 0 0-4 6.6 4 4 0 0 0 1 5.4V20h3v-2.5" />
@@ -163,7 +185,7 @@ export default function AvatarMenu() {
   );
 }
 
-function MenuLink({ href, label, icon, onClick }: { href: string; label: string; icon: React.ReactNode; onClick: () => void }) {
+function MenuLink({ href, label, icon, onClick, badge = 0 }: { href: string; label: string; icon: React.ReactNode; onClick: () => void; badge?: number }) {
   return (
     <Link
       href={href}
@@ -181,6 +203,26 @@ function MenuLink({ href, label, icon, onClick }: { href: string; label: string;
     >
       <span style={{ color: "var(--ink-soft)", display: "flex" }}>{icon}</span>
       {label}
+      {badge > 0 && (
+        <span
+          style={{
+            marginLeft: "auto",
+            minWidth: 18,
+            height: 18,
+            padding: "0 5px",
+            borderRadius: 9,
+            background: "var(--heart)",
+            color: "var(--bg)",
+            fontSize: 11,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }

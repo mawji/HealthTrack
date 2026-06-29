@@ -130,29 +130,50 @@ export async function searchFoods(query: string, limit = 8): Promise<FdcCandidat
   const cached = cache[q];
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.candidates.slice(0, limit);
 
-  let candidates: FdcCandidate[] = [];
-  try {
-    const params = new URLSearchParams({
-      api_key: apiKey(),
-      query,
-      pageSize: "25",
-      dataType: "Foundation,SR Legacy,Survey (FNDDS),Branded",
-    });
-    const res = await fetch(`${SEARCH_URL}?${params}`, { headers: { Accept: "application/json" } });
-    if (res.ok) {
+  const params = new URLSearchParams({
+    api_key: apiKey(),
+    query,
+    pageSize: "25",
+    dataType: "Foundation,SR Legacy,Survey (FNDDS),Branded",
+  });
+  const url = `${SEARCH_URL}?${params}`;
+
+  // Up to two attempts: retry once (with backoff) on rate-limit / 5xx / network
+  // throws — the failures we saw were transient, not permanent. Only a genuine
+  // 200 result set is cacheable; a failed request must NOT be cached, or a
+  // transient outage would poison this query for the full 14-day TTL.
+  let candidates: FdcCandidate[] | null = null;
+  for (let attempt = 0; attempt < 2 && candidates === null; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (res.status === 429 || res.status >= 500) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1200));
+          continue;
+        }
+        break; // transient, but out of retries
+      }
+      if (!res.ok) break; // non-retryable 4xx
       const json = await res.json();
       const foods: any[] = Array.isArray(json?.foods) ? json.foods : [];
-      candidates = foods.map(mapFood).filter((c): c is FdcCandidate => !!c);
+      const mapped = foods.map(mapFood).filter((c): c is FdcCandidate => !!c);
       // Generic data types first (whole foods over branded novelty items),
       // preserving FDC's relevance order within each tier.
       const tier = (t: string) =>
         ({ Foundation: 0, "SR Legacy": 1, "Survey (FNDDS)": 2 } as Record<string, number>)[t] ?? 3;
-      candidates = candidates
+      candidates = mapped
         .map((c, i) => ({ c, i }))
         .sort((a, b) => tier(a.c.dataType) - tier(b.c.dataType) || a.i - b.i)
         .map((x) => x.c);
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
     }
-  } catch {
+  }
+
+  if (candidates === null) {
     if (cached) return cached.candidates.slice(0, limit); // serve stale on transient failure
     return [];
   }

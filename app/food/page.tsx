@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FoodAnalysis, FoodEntry, MealType, RemoteFoodEntry } from "@/lib/types";
+import { FoodAnalysis, FoodComponent, FoodEntry, MealType, RemoteFoodEntry } from "@/lib/types";
 
 const MEAL_OPTIONS: { value: MealType; label: string }[] = [
   { value: "breakfast", label: "Breakfast" },
@@ -157,6 +157,21 @@ export default function Food() {
       glycemicLoad: gi != null ? Math.round((gi * carbsG) / 100) : analysis.glycemicLoad,
       provenance: analysis.provenance ? { ...analysis.provenance, servingG: grams } : analysis.provenance,
     });
+  }
+
+  /** Rescale one component to a new portion and roll the change up into the meal
+   *  total. USDA-backed components rescale from their per-100 g density; AI
+   *  estimates scale linearly from their current portion. */
+  function updateComponentPortion(idx: number, grams: number) {
+    if (!analysis?.components) return;
+    const comps = analysis.components.map((c, i) => (i === idx ? rescaleComponent(c, grams) : c));
+    setAnalysis({ ...analysis, components: comps, ...sumComponents(comps) });
+  }
+
+  function removeComponent(idx: number) {
+    if (!analysis?.components || analysis.components.length <= 1) return;
+    const comps = analysis.components.filter((_, i) => i !== idx);
+    setAnalysis({ ...analysis, components: comps, ...sumComponents(comps) });
   }
 
   function resetComposer() {
@@ -333,6 +348,14 @@ export default function Food() {
               <MacroInput label="fat" value={analysis.fatG} onChange={(v) => setAnalysis({ ...analysis, fatG: v })} />
               <MacroInput label="GL" value={analysis.glycemicLoad ?? 0} onChange={(v) => setAnalysis({ ...analysis, glycemicLoad: v })} />
             </div>
+            {analysis.components && analysis.components.length > 1 && (
+              <ComponentList
+                components={analysis.components}
+                confidence={analysis.confidence}
+                onPortionChange={updateComponentPortion}
+                onRemove={removeComponent}
+              />
+            )}
             <div className="row" style={{ gap: 8, marginTop: 10 }}>
               <PickerField label="Meal">
                 <select className="field" value={meal} style={{ padding: "8px 10px", marginTop: 3 }} onChange={(e) => setMeal(e.target.value as MealType)}>
@@ -585,6 +608,21 @@ function LocalMealCard({
                     <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 3, lineHeight: 1.5 }}>{f.provenance.ingredients}</p>
                   </details>
                 )}
+                {f.components && f.components.length > 1 && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ fontSize: 11, color: "var(--ink-faint)", cursor: "pointer" }}>
+                      Breakdown ({f.components.length})
+                    </summary>
+                    <div style={{ marginTop: 3 }}>
+                      {f.components.map((c, i) => (
+                        <p key={`${c.name}-${i}`} style={{ fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+                          {c.name} · {c.portionG}g · {c.calories} kcal{" "}
+                          <span style={{ color: "var(--ink-faint)" }}>({isUsda(c) ? "USDA" : "AI"})</span>
+                        </p>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
             )}
           </div>
@@ -704,6 +742,151 @@ function MacroInput({ label, value, onChange }: { label: string; value: number; 
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
+  );
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Sum components into the meal's top-level macros. */
+function sumComponents(components: FoodComponent[]) {
+  return components.reduce(
+    (t, c) => ({
+      calories: Math.round(t.calories + c.calories),
+      proteinG: round1(t.proteinG + c.proteinG),
+      carbsG: round1(t.carbsG + c.carbsG),
+      fatG: round1(t.fatG + c.fatG),
+      glycemicLoad: Math.round(t.glycemicLoad + (c.glycemicLoad ?? 0)),
+    }),
+    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, glycemicLoad: 0 }
+  );
+}
+
+/** Rescale a component to `grams`. USDA-backed items use their per-100 g density;
+ *  AI estimates scale linearly from the current portion. GL tracks carbs when a
+ *  curated GI is known. */
+function rescaleComponent(c: FoodComponent, grams: number): FoodComponent {
+  const g = Math.max(1, Math.round(grams) || 1);
+  const gi = c.provenance.gi;
+  if (c.per100g) {
+    const f = g / 100;
+    const carbsG = round1(c.per100g.carbsG * f);
+    return {
+      ...c,
+      portionG: g,
+      calories: Math.round(c.per100g.calories * f),
+      proteinG: round1(c.per100g.proteinG * f),
+      carbsG,
+      fatG: round1(c.per100g.fatG * f),
+      glycemicLoad: gi != null ? Math.round((gi * carbsG) / 100) : c.glycemicLoad,
+      provenance: { ...c.provenance, servingG: g },
+    };
+  }
+  const f = g / (c.portionG || g);
+  const carbsG = round1(c.carbsG * f);
+  return {
+    ...c,
+    portionG: g,
+    calories: Math.round(c.calories * f),
+    proteinG: round1(c.proteinG * f),
+    carbsG,
+    fatG: round1(c.fatG * f),
+    glycemicLoad:
+      gi != null ? Math.round((gi * carbsG) / 100) : c.glycemicLoad != null ? Math.round(c.glycemicLoad * f) : undefined,
+    provenance: { ...c.provenance, servingG: g },
+  };
+}
+
+const isUsda = (c: FoodComponent) => c.provenance.source === "fdc";
+
+/** Editable per-ingredient breakdown. Editing a portion rescales that item and
+ *  recomputes the meal total; ✕ drops an item. Source tag shows USDA vs AI. */
+function ComponentList({
+  components,
+  confidence,
+  onPortionChange,
+  onRemove,
+}: {
+  components: FoodComponent[];
+  confidence?: "low" | "medium" | "high";
+  onPortionChange: (idx: number, grams: number) => void;
+  onRemove: (idx: number) => void;
+}) {
+  return (
+    <div style={{ marginTop: 12, border: "1px solid var(--border, rgba(0,0,0,0.08))", borderRadius: 12, overflow: "hidden" }}>
+      <div
+        style={{
+          padding: "7px 12px",
+          background: "var(--bg-inset)",
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: "var(--ink-soft)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        Breakdown · adjust a portion to refine the total
+      </div>
+      <div className="stack" style={{ gap: 0 }}>
+        {components.map((c, i) => (
+          <div
+            key={`${c.name}-${i}`}
+            className="row"
+            style={{ gap: 8, alignItems: "center", padding: "8px 12px", borderTop: i ? "1px solid var(--bg-inset)" : "none" }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+              <div style={{ fontSize: 11, color: "var(--ink-faint)" }}>
+                {c.calories} kcal for {c.portionG} g · P{c.proteinG} C{c.carbsG} F{c.fatG}
+                {c.glycemicLoad != null && c.glycemicLoad > 0 && ` · GL ${c.glycemicLoad}`}
+              </div>
+            </div>
+            <span
+              className="badge"
+              title={isUsda(c) ? "Macros from USDA FoodData Central" : `AI estimate — no USDA match${confidence ? ` (${confidence} confidence)` : ""}`}
+              style={{
+                flex: "none",
+                fontSize: 10,
+                fontWeight: 600,
+                background: isUsda(c) ? "var(--activity-soft, var(--bg-inset))" : "var(--bg-inset)",
+                color: isUsda(c) ? "var(--activity)" : "var(--ink-faint)",
+              }}
+            >
+              {isUsda(c) ? "USDA" : confidence ? `AI · ${confidence}` : "AI"}
+            </span>
+            <label style={{ flex: "none", display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                className="field"
+                type="number"
+                inputMode="decimal"
+                value={c.portionG}
+                aria-label={`${c.name} grams`}
+                style={{ width: 64, padding: "6px 8px", textAlign: "right" }}
+                onChange={(e) => onPortionChange(i, Math.max(1, Number(e.target.value) || 1))}
+              />
+              <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>g</span>
+            </label>
+            <button
+              onClick={() => onRemove(i)}
+              disabled={components.length <= 1}
+              aria-label={`remove ${c.name}`}
+              style={{
+                flex: "none",
+                background: "none",
+                border: "none",
+                color: "var(--ink-faint)",
+                cursor: components.length <= 1 ? "default" : "pointer",
+                opacity: components.length <= 1 ? 0.4 : 1,
+                fontSize: 16,
+                lineHeight: 1,
+                padding: 2,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

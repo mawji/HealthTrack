@@ -2,8 +2,9 @@
 
 A minimal, mobile-first **personal** health dashboard that runs entirely on your
 own machine. Live wearable data via the **Google Health API**, an app-derived
-**readiness score**, inline and trend **AI insights**, AI food logging (photo,
-text, **barcode**, or **USDA**-backed search), custom **habit tracking**,
+**readiness score**, inline and trend **AI insights**, AI food logging (photo &
+text **decomposed into USDA-matched ingredients**, plus **barcode** scan and
+**USDA**-backed search), custom **habit tracking**,
 **macro health goals**, a **profile** with deterministic nutrition/calorie
 targets, manual vitals logging, **exercise snacks**, a **live workout session**,
 **voice** logging, an **evidence-based, source-traceable coach that learns you**
@@ -267,7 +268,7 @@ owner-initiated.
 | **Daily** | Steps goal + zone ring, streak, water, workout card, sleep clock + hypnogram, an app-derived **Readiness score** (HRV/RHR/sleep vs your baseline), heart + key-metric rows, your Daily habits, and a pinned **Exercise Snacks** row — plus **inline AI insights by section** (movement, readiness, hydration, sleep, nutrition) for the current day only; opt-in **Goals card** surfacing active macro targets at the top |
 | **Fitness** | Workout history with rich capture — type, duration, intensity/effort, soreness, injuries, exercises; a **live "Start a workout" session** (running timer, in-session per-set logging from the wger library, pause/resume/finish, reconcile against a watch-tracked session on finish); a **Training Plan** of upcoming workouts (plan / complete / skip, auto-completed when a matching workout appears); and the Exercise Snacks row |
 | **Trends** | Week / month / 90-day / year trends with hover values; **AI summaries per range** (week & month on open, 90-day & year on demand); weight shows latest + low/high; **dynamic metric cards** — a card is added automatically for each active Goal (dashed target overlay), each manually logged vitals kind, and a calorie-target band on "calories in" |
-| **Food** | **Photo, text, barcode scan, or USDA food search** → calorie/macro estimate → edit → log to Google Health. Source-backed entries carry a **provenance badge** (USDA FoodData Central / Open Food Facts / AI estimate) and a cited **glycemic index / load** where known; meals logged elsewhere sync back |
+| **Food** | **Photo, text, barcode scan, or USDA food search** → calorie/macro estimate → edit → log to Google Health. Photo & text meals are **decomposed into their component ingredients**, and each ingredient is resolved against **USDA FoodData Central** (reference-grade macro density × your portion), falling back to an AI estimate per item — surfaced as an **editable per-ingredient breakdown** that re-totals as you adjust portions (single, obvious items skip straight to a fast estimate). Source-backed entries carry a **provenance badge** (USDA FoodData Central / Open Food Facts / AI estimate, or mixed) and a cited **glycemic index / load** where known; meals logged elsewhere sync back |
 | **Habits** | Create custom **boost/avoid** habits (targets, units, icons), log daily, track streaks; surfaced on Daily and in coach context; avoid habits have "Nailed it / I slipped" buttons |
 | **Exercise Snacks** | A row of ~9 "breathless minute" circles (the *10 breathless minutes* reframe of 10k steps), pinned on Daily and Fitness; tap a glowing circle to count a snack, with a **suggestion sheet** of anywhere-doable routines and animated demo figures. Resets per local day; logged through the coach and surfaced in its context |
 | **Profile** | Sex / DOB / height / weight / activity / goal → deterministic **BMI + category**, healthy-weight range, and **daily calorie + macro/hydration targets** (Mifflin-St Jeor, goal-adjusted, safety-capped). The coach treats these targets as authoritative |

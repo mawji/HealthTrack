@@ -489,6 +489,15 @@ export default function Coach() {
   // execute their actions; earlier ones (loaded from history) render inert.
   const [liveFromIndex, setLiveFromIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the composer up to a few lines, then scroll within.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
 
   const [weekData, setWeekData] = useState<DaySummary[]>([]);
 
@@ -779,13 +788,21 @@ export default function Coach() {
           <div ref={bottomRef} />
         </div>
         <div className="row" style={{ gap: 8, marginTop: 14 }}>
-          <input
+          <textarea
+            ref={inputRef}
             className="field"
-            placeholder={transcribing ? "Transcribing…" : recording ? "Listening — tap mic to stop" : "Ask about your health…"}
+            rows={1}
+            placeholder={transcribing ? "Transcribing…" : recording ? "Listening — tap mic to stop" : "Ask about your health…  (Shift+Enter for a new line)"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
             disabled={recording || transcribing}
+            style={{ resize: "none", lineHeight: 1.4, maxHeight: 140, overflowY: "auto" }}
           />
           <button
             className="btn"

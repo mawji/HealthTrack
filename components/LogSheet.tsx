@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconChip, habitIcon } from "./icons";
-import { MeasurementKind } from "@/lib/types";
+import { MeasurementKind, MedicationsPayload, MedicationDayStatus, HabitsPayload, HabitDefinition } from "@/lib/types";
+
+const PillIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-40 12 12)" />
+    <path d="M8.6 8.4l7 7" />
+  </svg>
+);
 
 // Items that route to an existing logging flow.
 const FLOWS: { key: string; label: string; icon: string; href: string }[] = [
@@ -71,11 +78,19 @@ export default function LogMenu() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [metric, setMetric] = useState<MetricCfg | null>(null);
+  const [panel, setPanel] = useState<"meds" | "habits" | null>(null);
 
   const close = () => {
     setOpen(false);
     setMetric(null);
+    setPanel(null);
   };
+  const back = () => {
+    setMetric(null);
+    setPanel(null);
+  };
+  const inView = metric || panel;
+  const title = metric ? metric.label : panel === "meds" ? "Medications" : panel === "habits" ? "Habits" : "Log manually";
 
   return (
     <div style={{ flex: "none" }}>
@@ -94,14 +109,18 @@ export default function LogMenu() {
           <div className="logsheet-scrim" onClick={close} />
           <div className="card logsheet-panel" onClick={(e) => e.stopPropagation()}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 14 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700 }}>{metric ? metric.label : "Log manually"}</h2>
-              <button className="icon-btn" aria-label={metric ? "back" : "close"} onClick={metric ? () => setMetric(null) : close}>
-                {metric ? "‹" : "✕"}
+              <h2 style={{ fontSize: 17, fontWeight: 700 }}>{title}</h2>
+              <button className="icon-btn" aria-label={inView ? "back" : "close"} onClick={inView ? back : close}>
+                {inView ? "‹" : "✕"}
               </button>
             </div>
 
             {metric ? (
               <MetricForm metric={metric} onDone={close} />
+            ) : panel === "meds" ? (
+              <MedsLogPanel />
+            ) : panel === "habits" ? (
+              <HabitsLogPanel />
             ) : (
               <div className="grid-2" style={{ gap: 10 }}>
                 {FLOWS.map((f) => (
@@ -116,6 +135,8 @@ export default function LogMenu() {
                     }}
                   />
                 ))}
+                <MenuItem iconNode={PillIcon} label="Medication" color="var(--heart)" onClick={() => setPanel("meds")} />
+                <MenuItem icon="check" label="Habits" color="var(--activity)" onClick={() => setPanel("habits")} />
                 {METRICS.map((m) => (
                   <MenuItem key={m.kind} icon={m.icon} label={m.label} color="var(--breath)" onClick={() => setMetric(m)} />
                 ))}
@@ -128,7 +149,7 @@ export default function LogMenu() {
   );
 }
 
-function MenuItem({ icon, label, color, onClick }: { icon: string; label: string; color: string; onClick: () => void }) {
+function MenuItem({ icon, iconNode, label, color, onClick }: { icon?: string; iconNode?: React.ReactNode; label: string; color: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -148,9 +169,217 @@ function MenuItem({ icon, label, color, onClick }: { icon: string; label: string
         fontSize: 13.5,
       }}
     >
-      <IconChip icon={habitIcon(icon)} color={color} size={24} />
+      <IconChip icon={iconNode ?? habitIcon(icon ?? "check")} color={color} size={24} />
       {label}
     </button>
+  );
+}
+
+// ── Medication quick-log: all today's meds, next due highlighted ───────────
+
+function MedsLogPanel() {
+  const [payload, setPayload] = useState<MedicationsPayload | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = () => fetch("/api/medications").then((r) => r.json()).then(setPayload).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  async function record(medId: string, doseIndex: number, status: "taken" | "skipped" | null) {
+    setBusy(medId + ":" + doseIndex);
+    try {
+      await fetch("/api/medications/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ medicationId: medId, doseIndex, status }),
+      });
+      try { window.dispatchEvent(new Event("ht-meds-changed")); } catch {}
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const statusFor = (id: string): MedicationDayStatus | undefined => payload?.status.find((s) => s.medicationId === id);
+  const meds = (payload?.medications ?? []).filter((m) => m.active);
+  const shown = meds.filter((m) => { const s = statusFor(m.id); return s?.scheduledToday || s?.asNeeded; });
+
+  // The single "next due" dose to emphasize: earliest overdue, else earliest upcoming.
+  const pending: { key: string; time: string; overdue: boolean }[] = [];
+  for (const m of shown) {
+    const s = statusFor(m.id);
+    if (!s || s.asNeeded) continue;
+    for (const d of s.doses) if (d.status == null && d.time) pending.push({ key: m.id + ":" + d.doseIndex, time: d.time, overdue: d.overdue });
+  }
+  pending.sort((a, b) => a.time.localeCompare(b.time));
+  const nextKey = (pending.find((p) => p.overdue) ?? pending[0])?.key ?? null;
+
+  if (!payload) return <p style={{ color: "var(--ink-soft)", fontSize: 13 }}>Loading…</p>;
+  if (shown.length === 0) {
+    return <p style={{ color: "var(--ink-soft)", fontSize: 13 }}>No medications scheduled today.</p>;
+  }
+
+  return (
+    <div className="stack" style={{ gap: 10, maxHeight: "52vh", overflowY: "auto" }}>
+      {shown.map((m) => {
+        const s = statusFor(m.id);
+        return (
+          <div key={m.id} style={{ padding: "10px 12px", borderRadius: 12, background: "var(--bg-inset)", border: "1px solid var(--hairline)" }}>
+            <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                {m.name}
+                {m.critical && <span style={{ color: "var(--heart)", fontSize: 11, marginLeft: 6 }}>• critical</span>}
+              </span>
+              {s?.asNeeded ? (
+                <button className="btn btn-ghost" disabled={busy != null} style={{ padding: "5px 10px", fontSize: 12.5 }} onClick={() => record(m.id, Date.now() % 100000, "taken")}>
+                  + Log dose {s.takenCount ? `(${s.takenCount})` : ""}
+                </button>
+              ) : null}
+            </div>
+            {!s?.asNeeded && (
+              <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {(s?.doses ?? []).map((d) => {
+                  const key = m.id + ":" + d.doseIndex;
+                  const taken = d.status === "taken";
+                  const isNext = key === nextKey;
+                  return (
+                    <button
+                      key={d.doseIndex}
+                      disabled={busy != null}
+                      onClick={() => record(m.id, d.doseIndex, taken ? null : "taken")}
+                      title={taken ? "Taken — tap to clear" : "Mark taken"}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "5px 10px",
+                        borderRadius: 999,
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: taken ? "var(--activity)" : "transparent",
+                        color: taken ? "var(--bg)" : d.overdue ? "var(--heart)" : "var(--ink)",
+                        border: `1px solid ${taken ? "var(--activity)" : d.overdue ? "var(--heart)" : "var(--hairline)"}`,
+                        boxShadow: isNext && !taken ? "0 0 0 2px color-mix(in srgb, var(--heart) 35%, transparent)" : undefined,
+                      }}
+                    >
+                      {taken ? "✓ " : ""}{d.time ?? "dose"}
+                      {isNext && !taken ? <span style={{ fontSize: 10, opacity: 0.85 }}>· next</span> : d.status === "skipped" ? <span style={{ fontSize: 10, opacity: 0.7 }}>· skipped</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Habit quick-log: all active habits with their control ──────────────────
+
+function HabitsLogPanel() {
+  const [payload, setPayload] = useState<HabitsPayload | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = () => fetch("/api/habits").then((r) => r.json()).then(setPayload).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  async function log(habitId: string, value: boolean | number | null) {
+    if (!payload) return;
+    setBusy(habitId);
+    try {
+      await fetch("/api/habits/record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ habitId, date: payload.date, value }),
+      });
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const habits = (payload?.habits ?? []).filter((h) => h.active);
+  const valueFor = (id: string): boolean | number | null => payload?.status.find((s) => s.habitId === id)?.value ?? null;
+
+  if (!payload) return <p style={{ color: "var(--ink-soft)", fontSize: 13 }}>Loading…</p>;
+  if (habits.length === 0) {
+    return <p style={{ color: "var(--ink-soft)", fontSize: 13 }}>No habits yet.</p>;
+  }
+
+  return (
+    <div className="stack" style={{ gap: 10, maxHeight: "52vh", overflowY: "auto" }}>
+      {habits.map((h) => (
+        <div key={h.id} className="row" style={{ justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 12, background: "var(--bg-inset)", border: "1px solid var(--hairline)", opacity: busy === h.id ? 0.6 : 1 }}>
+          <div className="row" style={{ gap: 9, minWidth: 0 }}>
+            <IconChip icon={habitIcon(h.iconKey)} color={h.color ?? "var(--activity)"} size={22} />
+            <span style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+          </div>
+          <HabitQuickControl habit={h} value={valueFor(h.id)} busy={busy === h.id} onLog={(v) => log(h.id, v)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Compact per-type control for the quick-log sheet (mirrors the Habits page). */
+function HabitQuickControl({ habit, value, busy, onLog }: { habit: HabitDefinition; value: boolean | number | null; busy: boolean; onLog: (v: boolean | number | null) => void }) {
+  const color = habit.color ?? "var(--activity)";
+  const pill = (active: boolean, activeBg: string): React.CSSProperties => ({
+    padding: "6px 11px",
+    borderRadius: 999,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: `1px solid ${active ? activeBg : "var(--hairline)"}`,
+    background: active ? activeBg : "transparent",
+    color: active ? "var(--bg)" : "var(--ink)",
+    flex: "none",
+  });
+
+  if (habit.targetType === "yes_no") {
+    if (habit.kind === "avoid") {
+      const nailed = value === false;
+      const slipped = value === true;
+      return (
+        <div className="row" style={{ gap: 6 }}>
+          <button disabled={busy} onClick={() => onLog(nailed ? null : false)} style={pill(nailed, "var(--activity)")}>✓</button>
+          <button disabled={busy} onClick={() => onLog(slipped ? null : true)} style={pill(slipped, "var(--heart)")}>✗</button>
+        </div>
+      );
+    }
+    const done = value === true;
+    return (
+      <button disabled={busy} onClick={() => onLog(done ? null : true)} style={pill(done, color)}>
+        {done ? "✓ Done" : "Mark done"}
+      </button>
+    );
+  }
+
+  const current = typeof value === "number" ? value : 0;
+  const step = habit.defaultValue && habit.defaultValue > 0 ? habit.defaultValue : 1;
+
+  if (habit.targetType === "duration") {
+    return (
+      <div className="row" style={{ gap: 6, alignItems: "center" }}>
+        <span className="display-num" style={{ fontSize: 16, color }}>{current}</span>
+        <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>{habit.unit ?? "min"}</span>
+        {[5, 10, 30].map((q) => (
+          <button key={q} disabled={busy} onClick={() => onLog(current + q)} style={pill(false, color)}>+{q}</button>
+        ))}
+        {current > 0 && <button disabled={busy} onClick={() => onLog(null)} style={pill(false, color)}>↺</button>}
+      </div>
+    );
+  }
+
+  // count / quantity → −/+ stepper
+  return (
+    <div className="row" style={{ gap: 8, alignItems: "center" }}>
+      <button disabled={busy || current <= 0} onClick={() => onLog(Math.max(0, current - step) || null)} style={{ ...pill(false, color), opacity: current <= 0 ? 0.4 : 1 }}>−</button>
+      <span className="display-num" style={{ fontSize: 16, color, minWidth: 22, textAlign: "center" }}>{current}</span>
+      <button disabled={busy} onClick={() => onLog(current + step)} style={pill(true, color)}>+</button>
+    </div>
   );
 }
 

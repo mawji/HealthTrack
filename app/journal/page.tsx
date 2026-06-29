@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { IconChip, habitIcon, workoutIcon, workoutLabel as _wl, ForkIcon } from "@/components/icons";
 import { WorkoutDetailForm } from "@/components/WorkoutDetailForm";
+import { WellbeingJournal } from "@/components/WellbeingJournal";
 import { WorkoutTypePicker } from "@/components/WorkoutTypePicker";
 import { detailIsEmpty, formatDetail } from "@/lib/workout-detail";
 import { DEFAULT_QUICK_TYPES, WorkoutType } from "@/lib/workout-types";
@@ -71,6 +72,7 @@ export default function JournalPage() {
   const [habits, setHabits] = useState<HabitRec[]>([]);
   const [quickTypes, setQuickTypes] = useState<WorkoutType[]>(DEFAULT_QUICK_TYPES);
   const [filter, setFilter] = useState<Kind | "all">("all");
+  const [view, setView] = useState<"log" | "wellbeing">("log");
   const [editing, setEditing] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -91,6 +93,11 @@ export default function JournalPage() {
     setLoaded(true);
   };
   useEffect(() => { load(); }, []);
+
+  // Deep-link: /journal?view=wellbeing (from the Settings → Intelligence panel).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "wellbeing") setView("wellbeing");
+  }, []);
 
   const items = useMemo<JournalItem[]>(() => {
     const all: JournalItem[] = [
@@ -133,6 +140,15 @@ export default function JournalPage() {
       </header>
 
       <div className="row rise rise-1" style={{ gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <button className={`btn ${view === "log" ? "" : "btn-ghost"}`} style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => setView("log")}>Log</button>
+        <button className={`btn ${view === "wellbeing" ? "" : "btn-ghost"}`} style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => setView("wellbeing")}>Wellbeing</button>
+      </div>
+
+      {view === "wellbeing" ? (
+        <WellbeingJournal />
+      ) : (
+      <>
+      <div className="row rise rise-1" style={{ gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
           <button key={f.key} className={`btn ${filter === f.key ? "" : "btn-ghost"}`} style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => setFilter(f.key)}>
             {f.label}
@@ -165,6 +181,8 @@ export default function JournalPage() {
             </div>
           ))}
         </div>
+      )}
+      </>
       )}
 
     </main>

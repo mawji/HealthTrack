@@ -4,6 +4,7 @@ import { isConnected, logFoodToGoogleHealth } from "@/lib/googlehealth";
 import { getRemoteMeals } from "@/lib/remote-food";
 import { hasAiKey } from "@/lib/ai-provider";
 import { decomposeAndResolve } from "@/lib/food-decompose";
+import { appendNote } from "@/lib/coach/scratchpad";
 import { FoodAnalysis, FoodComponent, FoodEntry, FoodProvenance, MealType, NutritionSource } from "@/lib/types";
 
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "other"];
@@ -173,6 +174,15 @@ export async function POST(req: NextRequest) {
   const foods = readJson<FoodEntry[]>("food-log.json", []);
   foods.push(entry);
   writeJson("food-log.json", foods);
+
+  // Scratchpad: a cheap qualitative note (the meal name — which the digest's
+  // calorie totals don't capture). Photo logs are tagged as such. Best-effort.
+  appendNote({
+    source: photo ? "food-photo" : "log",
+    note: `ate ${entry.mealType !== "other" ? entry.mealType + ": " : ""}${entry.name} (${entry.calories} kcal${entry.glycemicLoad ? `, GL ${entry.glycemicLoad}` : ""})`,
+    tags: ["food"],
+  });
+
   return NextResponse.json(entry);
 }
 

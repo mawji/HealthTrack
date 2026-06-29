@@ -3,7 +3,7 @@ import { buildCoachContext, COACH_PERSONA } from "@/lib/context";
 import { hasAiKey } from "@/lib/openrouter";
 import { streamWithFallback } from "@/lib/ai-provider";
 import { ChatMessage } from "@/lib/types";
-import { localDateStr } from "@/lib/store";
+import { localDateTimeStr } from "@/lib/store";
 
 export async function POST(req: NextRequest) {
   if (!hasAiKey()) {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   const { text: context } = await buildCoachContext(14, lastUser);
   const ctxMs = Date.now() - tCtx;
 
-  const system = `${COACH_PERSONA}\n\nCurrent date: ${localDateStr()}\n\n${context}`;
+  const system = `${COACH_PERSONA}\n\nCurrent date & time: ${localDateTimeStr()}\n\n${context}`;
 
   try {
     const tProv = Date.now();

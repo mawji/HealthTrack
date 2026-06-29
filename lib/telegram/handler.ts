@@ -260,6 +260,8 @@ function labelFor(spec: any): string {
     case "logFood": return `${spec.name ?? "meal"} (${spec.calories ?? "?"} kcal)`;
     case "logHabit": return `habit ${spec.habitId ?? "?"}`;
     case "planWorkout": return `plan: ${spec.name ?? "workout"} on ${spec.date ?? "?"}`;
+    case "setReminder": return `reminder: ${spec.text ?? "?"}${spec.atTime ? ` at ${spec.atTime}` : spec.dueAt ? ` (${spec.dueAt})` : ""}`;
+    case "cancelReminder": return `cancel reminder ${spec.match ?? spec.id ?? "?"}`;
     default: return spec?.action ?? "action";
   }
 }

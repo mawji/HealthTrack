@@ -5,6 +5,7 @@
 
 import { readJson, writeJson, newId } from "./store";
 import { logWeightToGoogleHealth, logBodyFatToGoogleHealth, deleteDataPoint } from "./googlehealth";
+import { appendNote } from "./coach/scratchpad";
 import { Measurement, MeasurementKind } from "./types";
 
 // Manual kinds the Google Health v4 API accepts dataPoints:create for (others
@@ -108,6 +109,15 @@ export function addMeasurement(raw: unknown): Measurement | { error: string } {
   const rows = getMeasurements();
   rows.push(m);
   saveMeasurements(rows);
+  // Scratchpad: a concrete vitals reading (a specific value the digest's rollups
+  // don't surface — e.g. a high glucose). Best-effort, never blocks the log.
+  const v2 = m.value2 != null ? `/${m.value2}` : "";
+  const ctx = m.context ? ` (${m.context})` : "";
+  appendNote({
+    source: "measurement",
+    note: `logged ${MEASUREMENT_LABELS[m.kind].toLowerCase()}: ${m.value}${v2} ${m.unit}${ctx}`,
+    tags: ["vitals", m.kind],
+  });
   return m;
 }
 

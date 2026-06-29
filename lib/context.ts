@@ -43,6 +43,7 @@ import {
   formatMedicationForCoach,
 } from "./medications";
 import { localNowParts } from "./medication-reminders";
+import { remindersContextBlock } from "./reminders";
 import { getProfile, deriveProfile, ACTIVITY_LABELS, GOAL_LABELS } from "./profile";
 import { formatEvidenceForCoach } from "./evidence";
 import { formatMemoryForCoach } from "./memory";
@@ -566,6 +567,16 @@ export async function buildCoachContext(days = 14, query?: string): Promise<{ te
     }
   } catch {
     // medications are optional context
+  }
+
+  // Active dynamic reminders the user set via the coach ("remind me in an
+  // hour"). Gives the coach the ids to cancel and answers "what reminders do I
+  // have?"; also states the quiet-hours window so it can flag an overlap.
+  try {
+    const block = remindersContextBlock();
+    if (block) lines.push("", block);
+  } catch {
+    // reminders are optional context
   }
 
   // User-set macro goals (coach-visible only), with deterministic status. The

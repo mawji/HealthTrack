@@ -8,6 +8,9 @@
 // to the web path — there is exactly one logging implementation.
 
 import { CoachAction } from "@/lib/coach/parse";
+// Scratchpad notes are captured at the data-write route funnels (food/measurements/
+// records), so they cover every front-end (web, Telegram, +Log) exactly once —
+// no per-action hook here. See lib/coach/scratchpad.ts + Phase 4.
 
 /** The app's own origin. The dev/prod server is pinned to 127.0.0.1:3210. */
 export function appBaseUrl(): string {
@@ -39,6 +42,21 @@ async function deleteReq(path: string): Promise<any> {
   return res.json();
 }
 
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Short human description of a saved reminder (mirrors the web ActionRunner). */
+function reminderLabel(r: any): string {
+  if (r?.kind === "daily") return `${r.text} · daily ${r.atTime}`;
+  if (r?.kind === "weekly") {
+    const days = Array.isArray(r.days) ? r.days.map((d: number) => DOW[d]).join("/") : "";
+    return `${r.text} · ${days} ${r.atTime}`;
+  }
+  const when = r?.dueAt
+    ? new Date(r.dueAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+    : "";
+  return `${r?.text ?? "reminder"}${when ? ` · ${when}` : ""}`;
+}
+
 /** Execute a single parsed coach action, returning a short human confirmation
  *  string mirroring the wording the web ActionRunner shows. */
 export async function runAction(spec: any): Promise<string> {
@@ -47,6 +65,7 @@ export async function runAction(spec: any): Promise<string> {
   switch (spec.action) {
     case "logWorkout": {
       const saved = await postJson("/api/workouts", spec);
+      if (saved.attachedTo) return `added to ${saved.name}`;
       return (
         `${saved.name} · ${saved.durationMin} min` +
         (saved.syncedToHealth ? " · synced to Google Health" : " · saved to journal")
@@ -120,6 +139,21 @@ export async function runAction(spec: any): Promise<string> {
       });
       if (!record) throw new Error("no matching medication");
       return `${spec.medicationId} · ${record.status}`;
+    }
+    case "setReminder": {
+      const saved = await postJson("/api/reminders", {
+        text: spec.text,
+        kind: spec.kind,
+        dueAt: spec.dueAt,
+        atTime: spec.atTime,
+        days: spec.days,
+      });
+      return `reminder set — ${reminderLabel(saved)}`;
+    }
+    case "cancelReminder": {
+      const key = spec.id || spec.match || "";
+      const rec = await deleteReq(`/api/reminders?id=${encodeURIComponent(key)}`);
+      return `reminder cancelled — ${rec.text}`;
     }
     case "rememberFact": {
       const m = await postJson("/api/coach/memory", {

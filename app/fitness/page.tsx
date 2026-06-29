@@ -122,6 +122,17 @@ export default function Fitness() {
     load(days);
   }
 
+  // Fold overlapping sessions into one umbrella ("these are the same session"),
+  // or undo a fold. Non-destructive — unmerge restores the separate cards.
+  async function mergeSessions(umbrellaId: string, memberIds: string[]) {
+    await fetch("/api/workouts", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mergeSessions", umbrellaId, memberIds }) });
+    load(days);
+  }
+  async function unmergeSession(id: string) {
+    await fetch("/api/workouts", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unmergeSession", id }) });
+    load(days);
+  }
+
   // Relabel a session locally — Google sometimes reports a generic or wrong
   // type (e.g. "Lacrosse" for a gym session) that an edit in the Health app
   // never propagates back to the API. The override is stored on our side.
@@ -440,6 +451,26 @@ export default function Fitness() {
                             </div>
                           );
                         })()}
+                        {w.mergeSuggestion && (
+                          <div style={{ marginTop: 10, padding: "9px 11px", borderRadius: 10, background: "var(--bg-inset)", borderLeft: "3px solid var(--activity)" }}>
+                            <p style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+                              Looks like one session with {w.mergeSuggestion.members.map((m) => `${m.startTime} ${labelForType(m.exerciseType)}`).join(", ")} — merge so it isn’t counted twice?
+                            </p>
+                            <div className="row" style={{ gap: 8, marginTop: 7, flexWrap: "wrap" }}>
+                              <button className="btn btn-ghost" style={{ padding: "5px 11px", fontSize: 12 }} onClick={() => mergeSessions(w.mergeSuggestion!.umbrellaId, w.mergeSuggestion!.members.map((m) => m.id))}>
+                                Merge into this {fmtDur(w.durationMin)} session
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {w.mergedFrom && w.mergedFrom.length > 0 && (
+                          <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 8 }}>
+                            Includes {w.mergedFrom.map((m) => labelForType(m.exerciseType)).join(", ")} ·{" "}
+                            <button onClick={() => unmergeSession(w.id)} style={{ background: "none", border: "none", padding: 0, color: "var(--activity)", cursor: "pointer", fontSize: 11, textDecoration: "underline" }}>
+                              unmerge
+                            </button>
+                          </p>
+                        )}
                         {editing === w.id && (
                           <div style={{ marginTop: 12, borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
                             <p style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 8 }}>

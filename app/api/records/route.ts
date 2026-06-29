@@ -6,6 +6,7 @@ import { complete, hasAiKey } from "@/lib/openrouter";
 import { extractLabReport, ParsedReport } from "@/lib/labs";
 import { MedicalRecord } from "@/lib/types";
 import { runMemoryWatchers } from "@/lib/memory-watchers";
+import { appendNote } from "@/lib/coach/scratchpad";
 
 const INDEX = "records-index.json";
 
@@ -150,6 +151,16 @@ export async function POST(req: NextRequest) {
   records.push(record);
   writeJson(INDEX, records);
   deriveMemories();
+
+  // Scratchpad: note the upload event (the watchers handle the lab values; this
+  // gives the reflection the qualitative "a report came in" context). Best-effort.
+  const abnormal = (record.metrics ?? []).filter((m) => m.flag && m.flag !== "normal").length;
+  appendNote({
+    source: "lab-upload",
+    note: `lab/record uploaded: ${record.docType ?? record.filename}${abnormal ? ` (${abnormal} out-of-range marker${abnormal === 1 ? "" : "s"})` : ""}`,
+    tags: ["labs"],
+  });
+
   return NextResponse.json(record);
 }
 

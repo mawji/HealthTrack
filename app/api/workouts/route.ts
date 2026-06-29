@@ -16,6 +16,15 @@ import { WorkoutSession, WorkoutDetail } from "@/lib/types";
 import { reconcilePlans } from "@/lib/training-plan";
 import { DEFAULT_QUICK_TYPES, labelForType, WorkoutType } from "@/lib/workout-types";
 import { sanitizeDetail } from "@/lib/workout-detail";
+import {
+  sessionsOverlap,
+  readMerges,
+  applyMerges,
+  annotateSuggestions,
+  addMerge,
+  removeMerge,
+  findAttachTarget,
+} from "@/lib/workout-merge";
 
 const JOURNAL = "workout-journal.json";
 const OVERRIDES = "workout-overrides.json";
@@ -56,23 +65,7 @@ function addDays(date: string, n: number): string {
 }
 
 // ── live-session ↔ watch reconciliation ─────────────────────────────────────
-const RECONCILE_TOL_MS = 30 * 60 * 1000; // start-time drift tolerance
-const GENERIC_TYPES = new Set(["WORKOUT", "OTHER", "AEROBIC_WORKOUT", "CARDIO_WORKOUT", "EXERCISE_CLASS", "OUTDOOR_WORKOUT"]);
-
-function workoutRange(w: WorkoutSession): { s: number; e: number } {
-  const s = Date.parse(`${w.date}T${w.startTime || "00:00"}:00`);
-  return { s, e: s + (w.durationMin || 0) * 60000 };
-}
-
-function sessionsOverlap(a: WorkoutSession, b: WorkoutSession): boolean {
-  if (a.date !== b.date) return false;
-  const typeOk = a.exerciseType === b.exerciseType || GENERIC_TYPES.has(a.exerciseType) || GENERIC_TYPES.has(b.exerciseType);
-  if (!typeOk) return false;
-  const ra = workoutRange(a);
-  const rb = workoutRange(b);
-  if (Number.isNaN(ra.s) || Number.isNaN(rb.s)) return false;
-  return (ra.s < rb.e && rb.s < ra.e) || Math.abs(ra.s - rb.s) <= RECONCILE_TOL_MS;
-}
+// (overlap primitives + source-agnostic merge helpers live in lib/workout-merge.)
 
 /** Link app sessions awaiting a watch match to the overlapping watch session:
  *  adopt its googleName + metrics onto our detail-rich journal entry and claim
@@ -149,11 +142,16 @@ export async function GET(req: NextRequest) {
     return d ? { ...base, detail: d } : base;
   });
 
+  // Source-agnostic merging: fold stored merges into their umbrella (largest
+  // window wins; members contribute exercise detail, not double-counted metrics),
+  // then suggest merging any remaining overlapping same-day sessions.
+  const foldedSessions = annotateSuggestions(applyMerges(sessions, readMerges()));
+
   // Auto-complete planned workouts that actually happened (app or watch),
   // matched by date + compatible type. Uses the post-override types.
-  if (!demo) reconcilePlans(sessions.map((w) => ({ id: w.id, date: w.date, exerciseType: w.exerciseType })));
+  if (!demo) reconcilePlans(foldedSessions.map((w) => ({ id: w.id, date: w.date, exerciseType: w.exerciseType })));
 
-  return NextResponse.json({ demo, range: { start, end }, sessions, quickTypes: computeQuickTypes() });
+  return NextResponse.json({ demo, range: { start, end }, sessions: foldedSessions, quickTypes: computeQuickTypes() });
 }
 
 export async function POST(req: NextRequest) {
@@ -181,6 +179,35 @@ export async function POST(req: NextRequest) {
     syncedToHealth: false,
   };
 
+  // Structured exercises may arrive as detail.exercises (web detail form) or as a
+  // top-level exercises array (coach shortcut) — fold the latter into a detail blob.
+  const detail = sanitizeDetail(
+    body.detail ?? (Array.isArray(body.exercises) ? { exercises: body.exercises } : undefined)
+  );
+  if (detail) entry.detail = detail;
+
+  // Attach-at-log-time: when the coach logs specific exercises (e.g. "squats
+  // 3×15") during an existing same-day workout of a compatible type, fold them
+  // into that session instead of spawning a new card — so multiple voice logs
+  // across one session coalesce into one workout. Only for exercise-shaped logs
+  // (it carries exercises) that aren't watch-deferred. No Google call: exercise
+  // detail is app-local and never synced.
+  if (detail?.exercises?.length && !body.skipGoogleSync) {
+    const journal = readJson<WorkoutSession[]>(JOURNAL, []);
+    const target = findAttachTarget(journal, entry);
+    if (target) {
+      target.detail = {
+        ...(target.detail ?? {}),
+        exercises: [...(target.detail?.exercises ?? []), ...detail.exercises],
+      };
+      writeJson(JOURNAL, journal);
+      const details = readJson<Record<string, WorkoutDetail>>(DETAIL, {});
+      details[target.id] = target.detail;
+      writeJson(DETAIL, details);
+      return NextResponse.json({ ...target, attachedTo: target.id });
+    }
+  }
+
   // skipGoogleSync: set when finishing a live session the user also tracked on
   // their watch — we hold off writing to Google and let the GET reconciliation
   // link this journal entry to the watch session once it syncs (no duplicate).
@@ -207,9 +234,7 @@ export async function POST(req: NextRequest) {
     entry.awaitingWatchMatch = true;
   }
 
-  const detail = sanitizeDetail(body.detail);
   if (detail) {
-    entry.detail = detail;
     const details = readJson<Record<string, WorkoutDetail>>(DETAIL, {});
     details[entry.id] = detail;
     writeJson(DETAIL, details);
@@ -227,6 +252,24 @@ export async function POST(req: NextRequest) {
 // { id, clear: true } reverts to whatever Google/journal reports.
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
+
+  // Source-agnostic merge: fold the chosen members into an umbrella session, or
+  // undo it. Non-destructive — only the link store changes; the GET handler
+  // re-derives the merged view, so unmerge brings the members back.
+  if (body.action === "mergeSessions") {
+    const umbrellaId = String(body.umbrellaId ?? "");
+    const memberIds = Array.isArray(body.memberIds) ? body.memberIds.map(String) : [];
+    if (!umbrellaId || !memberIds.length) return NextResponse.json({ error: "bad merge" }, { status: 400 });
+    addMerge(umbrellaId, memberIds);
+    return NextResponse.json({ ok: true });
+  }
+  if (body.action === "unmergeSession") {
+    const target = String(body.id ?? "");
+    if (!target) return NextResponse.json({ error: "missing id" }, { status: 400 });
+    removeMerge(target);
+    return NextResponse.json({ ok: true });
+  }
+
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 

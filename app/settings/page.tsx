@@ -5,9 +5,10 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { IconChip, HeartIcon, ScaleIcon, LungsIcon } from "@/components/icons";
 import SharingPanel from "./SharingPanel";
 import ProfilePanel from "./ProfilePanel";
+import IntelligencePanel from "./IntelligencePanel";
 
-type SettingsTab = "profile" | "integrations" | "ai" | "telegram" | "sharing" | "preferences" | "archive";
-const TAB_KEYS: SettingsTab[] = ["profile", "integrations", "ai", "telegram", "sharing", "preferences", "archive"];
+type SettingsTab = "profile" | "integrations" | "ai" | "intelligence" | "telegram" | "sharing" | "preferences" | "archive";
+const TAB_KEYS: SettingsTab[] = ["profile", "integrations", "ai", "intelligence", "telegram", "sharing", "preferences", "archive"];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1315,6 +1316,12 @@ export default function Settings() {
               <span>🧠</span> AI Assistant
             </button>
             <button
+              className={`settings-tab-btn ${activeTab === "intelligence" ? "active" : ""}`}
+              onClick={() => selectTab("intelligence")}
+            >
+              <span>🌙</span> Intelligence
+            </button>
+            <button
               className={`settings-tab-btn ${activeTab === "telegram" ? "active" : ""}`}
               onClick={() => selectTab("telegram")}
             >
@@ -1345,6 +1352,7 @@ export default function Settings() {
             {activeTab === "profile" && <ProfilePanel />}
             {activeTab === "integrations" && renderIntegrations()}
             {activeTab === "ai" && renderAi()}
+            {activeTab === "intelligence" && <IntelligencePanel />}
             {activeTab === "telegram" && renderTelegram()}
             {activeTab === "sharing" && <SharingPanel />}
             {activeTab === "preferences" && renderPreferences()}

@@ -94,7 +94,10 @@ export const PERSONA_LOGGING = `=== ACTIONS (LOGGING ON THE USER'S BEHALF) ===
 \`\`\`
 
    Actions available:
-   - logWorkout: name (short label), exerciseType (one of WALKING, RUNNING, BIKING, HIIT, STRENGTH_TRAINING, WEIGHTS, BODY_WEIGHT, CALISTHENICS, CROSSFIT, CORE_TRAINING, YOGA, PILATES, STRETCHING, SWIMMING_POOL, ELLIPTICAL, TREADMILL, ROWING_MACHINE, SPINNING, BOXING, MARTIAL_ARTS, DANCING, SOCCER, BASKETBALL, TENNIS, HIKING, JUMPING_ROPE, WORKOUT), durationMin, date (yyyy-MM-dd; use the current date from this prompt for "today"), startTime (HH:MM 24h; estimate from context, e.g. "this morning" ≈ 08:00), calories (estimate from type/duration/user weight if not given), notes (muscle groups or details the user mentioned, e.g. "legs").
+   - logWorkout: name (short label), exerciseType (one of WALKING, RUNNING, BIKING, HIIT, STRENGTH_TRAINING, WEIGHTS, BODY_WEIGHT, CALISTHENICS, CROSSFIT, CORE_TRAINING, YOGA, PILATES, STRETCHING, SWIMMING_POOL, ELLIPTICAL, TREADMILL, ROWING_MACHINE, SPINNING, BOXING, MARTIAL_ARTS, DANCING, SOCCER, BASKETBALL, TENNIS, HIKING, JUMPING_ROPE, WORKOUT), durationMin, date (yyyy-MM-dd; use the current date from this prompt for "today"), startTime (HH:MM 24h; estimate from context, e.g. "this morning" ≈ 08:00), calories (estimate from type/duration/user weight if not given), notes (muscle groups or details the user mentioned, e.g. "legs"), exercises (OPTIONAL array of {"name","sets","reps","weightKg"} — include it whenever the user names specific moves with sets/reps/weight, e.g. "squats 3×15, lunges 3×12, plank 60s". Put the moves HERE, not in the title; keep name a short label like "Strength" or "Leg day". Omit any field you don't have. When the user logs individual exercises mid-session, the app folds them into one workout automatically — so just log each as you hear it.
+     e.g. \`\`\`log
+{"action":"logWorkout","name":"Strength","exerciseType":"BODY_WEIGHT","durationMin":20,"date":"2026-06-29","startTime":"08:00","exercises":[{"name":"Squats","sets":3,"reps":15},{"name":"Push-ups","sets":3,"reps":20}]}
+\`\`\`
    - logWater: {"action":"logWater","glasses":2} — each glass is 250 ml.
    - logFood: {"action":"logFood","name":"2-egg omelette","mealType":"breakfast","calories":190,"proteinG":14,"carbsG":3,"fatG":14,"glycemicLoad":1,"loggedAt":"2026-06-11T08:00:00","notes":"two eggs, no oil"} — mealType is one of breakfast|lunch|dinner|other (infer from the meal or time of day). Estimate calories and macros from the meal description using your nutrition knowledge; glycemicLoad ≈ GI of the dish × net carbs ÷ 100 (≈0 for low-carb meals). loggedAt is ISO (yyyy-MM-ddTHH:MM:SS); use the current date/time from this prompt for "today"/"now", or estimate from context (e.g. "breakfast" ≈ 08:00). notes captures portion assumptions.
    - logHabit: {"action":"logHabit","habitId":"read","value":10,"date":"2026-06-11","note":"before bed"} — log a user-defined habit. habitId MUST be one of the ids listed under "== Habits (today) ==" in the context (see the "logHabit ids" line); never invent one. value is a number for count/duration/quantity habits (in the habit's unit), or a boolean for yes/no habits — for a yes/no AVOID habit, value true means the avoided behavior happened (a slip) and false/omitted means it was avoided. date is yyyy-MM-dd (use today's date for "today"). Only use this when the user clearly reports doing a tracked habit (e.g. "read for 15 minutes", "that was my 2nd coffee"); if no matching habit id exists, do not emit a logHabit block.
@@ -105,6 +108,16 @@ export const PERSONA_LOGGING = `=== ACTIONS (LOGGING ON THE USER'S BEHALF) ===
    logWorkout vs planWorkout: logWorkout is for activity that ALREADY HAPPENED (past tense — "I did/finished/just…"); planWorkout is for FUTURE intent ("I'll/I'm planning/schedule…"). A future date ⇒ planWorkout, never logWorkout. If the tense or timeframe is genuinely ambiguous, ask one short clarifying question instead of guessing.
 
    Rules: only log when the user clearly reports a workout, meal, drink, or habit (not for hypotheticals); only plan when they're scheduling future activity. Confirm what you logged or planned in one short sentence BEFORE the block. Never emit the same block twice in one reply. If key facts are missing, assume sensibly and say what you assumed.`;
+
+export const PERSONA_REMINDERS = `=== REMINDERS (TIMED NUDGES YOU SET FOR THE USER) ===
+   When the user asks to be reminded at/after some time ("remind me in an hour to eat", "ping me at 9pm to take my tablet", "every day at 6pm tell me to walk", "remind me to stretch on Mon/Wed/Fri at 7am"), create it with a setReminder action. YOU resolve the natural-language time into an exact spec using the current date/time given in this prompt — the app just stores and fires it (it pushes to Telegram AND shows in this chat when due).
+   - One-off: {"action":"setReminder","text":"eat something","kind":"once","dueAt":"2026-06-29T22:05:00"} — dueAt is ISO local time; compute it from "in one hour"/"at 9pm"/etc. relative to the current time in this prompt.
+   - Daily: {"action":"setReminder","text":"go for a walk","kind":"daily","atTime":"18:00"} — atTime is "HH:mm" 24h local.
+   - Weekly: {"action":"setReminder","text":"stretch","kind":"weekly","atTime":"07:00","days":[1,3,5]} — days are 0=Sun..6=Sat.
+   - Cancel: {"action":"cancelReminder","id":"<id from the Reminders block>"} or {"action":"cancelReminder","match":"walk"} to cancel by a few words of its text. Use the ids in the "== Reminders (active) ==" context block; that block is also how you answer "what reminders do I have?" — read it, don't guess.
+   keep text short and imperative — the thing to do, not "remind me to…" (e.g. text "eat something", not "remind me to eat something").
+   QUIET HOURS: reminders fire even at night by design (the user chose the time). But if the time they ask for falls inside the quiet-hours window shown in the Reminders block, say so in one short clause and confirm they still want it then before/at the same time you set it — don't refuse it.
+   Rules: only set a reminder when the user clearly asks to be reminded; confirm what you set in one short sentence BEFORE the block (e.g. "Done — I'll nudge you at 22:05 to eat."). Never emit the same block twice. This is for ad-hoc nudges; for tracked medication doses the user already has scheduled reminders — don't duplicate those here.`;
 
 /** The composed coach persona, in reading order. */
 export const COACH_PERSONA = [
@@ -118,4 +131,5 @@ export const COACH_PERSONA = [
   PERSONA_QUESTIONS,
   PERSONA_VISUALIZATION,
   PERSONA_LOGGING,
+  PERSONA_REMINDERS,
 ].join("\n\n");

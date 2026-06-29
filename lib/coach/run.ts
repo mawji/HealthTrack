@@ -8,7 +8,7 @@
 import { buildCoachContext, COACH_PERSONA } from "@/lib/context";
 import { completeWithFallback } from "@/lib/ai-provider";
 import { ChatMessage } from "@/lib/types";
-import { localDateStr } from "@/lib/store";
+import { localDateTimeStr } from "@/lib/store";
 
 export type CoachTurnResult = {
   /** The full assistant reply, including any ```viz / ```log fences. */
@@ -27,7 +27,7 @@ export async function runCoachTurn(
   contextDays = 14
 ): Promise<CoachTurnResult> {
   const { text: context } = await buildCoachContext(contextDays);
-  const system = `${COACH_PERSONA}\n\nCurrent date: ${localDateStr()}\n\n${context}`;
+  const system = `${COACH_PERSONA}\n\nCurrent date & time: ${localDateTimeStr()}\n\n${context}`;
 
   const { text, usedSecondary, servedLabel } = await completeWithFallback([
     { role: "system", content: system },

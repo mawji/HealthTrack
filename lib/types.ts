@@ -223,6 +223,18 @@ export interface WorkoutSession {
   // they also tracked it on their watch). The workouts GET reconciliation links
   // it to the overlapping watch session once it syncs, then clears this.
   awaitingWatchMatch?: boolean;
+  // Read-time merge annotations (computed by the workouts GET, never persisted on
+  // the session itself — the links live in workout-merges.json).
+  mergedFrom?: WorkoutMergeMember[]; // umbrella: sessions folded into this one
+  mergeSuggestion?: { umbrellaId: string; members: WorkoutMergeMember[] }; // "these look like one session — merge?"
+}
+
+/** A session referenced by a merge (folded-in member, or a suggested member). */
+export interface WorkoutMergeMember {
+  id: string;
+  name: string;
+  exerciseType: string;
+  startTime: string;
 }
 
 export interface WaterEntry {
@@ -630,7 +642,7 @@ export type CoachMemoryCategory =
   | "boundary"     // explicit do-not-probe (only from an explicit user opt-out)
   | "other";
 
-export type CoachMemorySource = "coach" | "user" | "proactive" | "derived";
+export type CoachMemorySource = "coach" | "user" | "proactive" | "derived" | "reflection";
 
 export interface CoachMemory {
   id: string;

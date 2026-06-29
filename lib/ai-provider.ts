@@ -321,6 +321,61 @@ export function parseJsonReply<T>(text: string): T {
   return JSON.parse(raw) as T;
 }
 
+// ── Background-intelligence helpers (Phase 2) ─────────────────────────────────
+//
+// The background reflection picks its own provider+model PER TIER, independent of
+// the coach's primary/secondary roles. These reuse the same provider entries
+// (api keys / baseUrl / oauth tokens) already configured in data/ai-provider.json
+// — only the model is overridden. See plans/coach-background-intelligence.md.
+
+/** Methods the user can point a background tier at, with whether each is
+ *  configured. Ollama is always selectable (local, no credentials needed). */
+export function providerMethods(): { type: ProviderType; label: string; configured: boolean }[] {
+  const store = getStore();
+  return (Object.keys(PROVIDER_LABELS) as ProviderType[]).map((type) => ({
+    type,
+    label: PROVIDER_LABELS[type],
+    configured: type === "ollama" ? true : !!(store && entryFor(store, type)),
+  }));
+}
+
+/** List models installed on the local Ollama instance (its /api/tags). */
+export async function listOllamaModels(baseUrl?: string): Promise<string[]> {
+  const store = getStore();
+  const base = (baseUrl || store?.providers.ollama?.baseUrl || "http://localhost:11434").replace(/\/$/, "");
+  const res = await fetch(`${base}/api/tags`);
+  if (!res.ok) throw new Error(`Ollama not reachable at ${base} (${res.status})`);
+  const j = await res.json();
+  return (j.models ?? []).map((m: any) => m?.name).filter((n: any): n is string => typeof n === "string");
+}
+
+/** The default model id for a method (shown as a fallback option in the picker). */
+export function defaultModelFor(method: ProviderType): string {
+  const store = getStore();
+  return store?.providers[method]?.model || DEFAULTS[method].model;
+}
+
+/**
+ * Complete using a specific method + model, bypassing the primary/secondary
+ * roles. Resolves the provider's stored entry (keys/baseUrl/tokens) and overrides
+ * only the model. Throws if the chosen method isn't configured.
+ */
+export async function completeWithProvider(
+  method: ProviderType,
+  model: string,
+  messages: Msg[],
+  opts: { vision?: boolean; json?: boolean } = {}
+): Promise<string> {
+  const store = getStore();
+  let entry = store ? entryFor(store, method) : null;
+  if (!entry) {
+    if (method === "ollama") entry = {}; // default localhost base URL
+    else throw new Error(`${PROVIDER_LABELS[method]} is not configured`);
+  }
+  const withModel: ProviderEntry = { ...entry, model: model || entry.model, visionModel: model || entry.visionModel };
+  return callProvider(method, withModel, messages, opts);
+}
+
 // ── OpenAI ChatGPT — device code flow ─────────────────────────────────────────
 //
 // No client secret required. Uses OpenAI's public Codex CLI client ID.

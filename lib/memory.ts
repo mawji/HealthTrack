@@ -13,7 +13,7 @@ const CATEGORIES: CoachMemoryCategory[] = [
   "preference", "constraint", "condition", "lifestyle",
   "goal", "advice", "pattern", "openness", "boundary", "other",
 ];
-const SOURCES: CoachMemorySource[] = ["coach", "user", "proactive", "derived"];
+const SOURCES: CoachMemorySource[] = ["coach", "user", "proactive", "derived", "reflection"];
 
 // How many memories (and chars) the context block is allowed to spend. Pinned
 // memories always surface; the rest fill the remaining budget by recency.
@@ -153,6 +153,27 @@ export function updateMemory(id: string, patch: UpdateMemoryPatch): CoachMemory 
   m.updatedAt = new Date().toISOString();
   saveMemories(memories);
   return m;
+}
+
+/** Look up a single memory by id (active or archived). */
+export function getMemoryById(id: string): CoachMemory | null {
+  return getMemories().find((m) => m.id === id) ?? null;
+}
+
+/** Decay/retire stale background-derived memories: archive `reflection`-sourced
+ *  facts not reinforced (updated or surfaced) within `maxAgeDays`, unless pinned.
+ *  Only touches reflection memories — never user/coach/proactive facts. The
+ *  hygiene half of "refresh what's important, reduce the outdated". Returns the
+ *  count archived. */
+export function decayStaleReflectionMemories(maxAgeDays = 45): number {
+  const cutoff = Date.now() - maxAgeDays * 86_400_000;
+  let archived = 0;
+  for (const m of getActiveMemories()) {
+    if (m.source !== "reflection" || m.pinned) continue;
+    const last = Math.max(Date.parse(m.updatedAt) || 0, Date.parse(m.lastUsedAt ?? "") || 0);
+    if (last < cutoff && archiveMemory(m.id)) archived++;
+  }
+  return archived;
 }
 
 /** Soft-delete (archive) a memory. Returns false if no such id. */

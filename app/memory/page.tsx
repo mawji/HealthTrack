@@ -20,6 +20,7 @@ const CAT_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])) as
 
 const SOURCE_LABEL: Record<string, string> = {
   coach: "coach", user: "you", proactive: "from a question", derived: "noticed from data",
+  reflection: "noticed in review",
 };
 
 export default function MemoryPage() {

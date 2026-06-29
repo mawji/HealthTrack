@@ -92,8 +92,10 @@ function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: st
           if (!res.ok) throw new Error(`(${res.status})`);
           const saved = await res.json();
           setDetail(
-            `${saved.name} · ${saved.durationMin} min` +
-              (saved.syncedToHealth ? " · synced to Google Health" : " · saved to journal")
+            saved.attachedTo
+              ? `added to ${saved.name}`
+              : `${saved.name} · ${saved.durationMin} min` +
+                  (saved.syncedToHealth ? " · synced to Google Health" : " · saved to journal")
           );
         } else if (spec.action === "logWater") {
           const glasses = Math.max(1, Math.round(Number(spec.glasses) || 1));
@@ -243,6 +245,27 @@ function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: st
           if (!res.ok) throw new Error(`(${res.status})`);
           setDetail("won't bring that up again");
           try { window.dispatchEvent(new Event("ht-question-changed")); } catch {}
+        } else if (spec.action === "setReminder") {
+          setMemVerb("Reminder set");
+          const res = await fetch("/api/reminders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: spec.text, kind: spec.kind, dueAt: spec.dueAt, atTime: spec.atTime, days: spec.days }),
+          });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const r = await res.json();
+          const when =
+            r.kind === "daily" ? `daily ${r.atTime}`
+            : r.kind === "weekly" ? `${(r.days ?? []).map((d: number) => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d]).join("/")} ${r.atTime}`
+            : r.dueAt ? new Date(r.dueAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "";
+          setDetail(`${r.text}${when ? ` · ${when}` : ""}`);
+        } else if (spec.action === "cancelReminder") {
+          setMemVerb("Reminder cancelled");
+          const key = spec.id || spec.match || "";
+          const res = await fetch(`/api/reminders?id=${encodeURIComponent(key)}`, { method: "DELETE" });
+          if (!res.ok) throw new Error(`(${res.status})`);
+          const r = await res.json();
+          setDetail(r.text);
         } else {
           throw new Error(`unknown action ${spec.action}`);
         }
@@ -262,6 +285,8 @@ function ActionRunner({ spec, raw, msgKey, inert = false }: { spec: any; raw: st
       : spec?.action === "forgetFact" ? "Forgot"
       : spec?.action === "answerQuestion" || spec?.action === "declineTopic" ? "Noted"
       : spec?.action === "planWorkout" ? "Planned"
+      : spec?.action === "setReminder" ? "Reminder set"
+      : spec?.action === "cancelReminder" ? "Reminder cancelled"
       : "Logged";
     return (
       <div className="row" style={{ gap: 10, alignSelf: "flex-start", padding: "8px 14px", borderRadius: 14, border: "1px solid var(--hairline)", background: "var(--bg-raised)", fontSize: 13 }}>
@@ -541,6 +566,38 @@ export default function Coach() {
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // Surface fired dynamic reminders ("remind me in an hour") as coach bubbles,
+  // wherever the user is sitting. The feed endpoint also FIRES due reminders, so
+  // an open page works even when the local scheduler isn't running. Dedup by
+  // id+firedAt across reloads via localStorage so a daily reminder shows once.
+  useEffect(() => {
+    const SHOWN_KEY = "ht-shown-reminders";
+    const loadShown = (): Set<string> => {
+      try { return new Set(JSON.parse(localStorage.getItem(SHOWN_KEY) || "[]")); } catch { return new Set(); }
+    };
+    let stopped = false;
+    async function poll() {
+      try {
+        const { fired } = await fetch("/api/reminders/feed").then((r) => r.json());
+        if (stopped || !Array.isArray(fired) || !fired.length) return;
+        const shown = loadShown();
+        const fresh = fired.filter((f: any) => f?.id && !shown.has(`${f.id}:${f.firedAt}`));
+        if (!fresh.length) return;
+        for (const f of fresh) shown.add(`${f.id}:${f.firedAt}`);
+        try { localStorage.setItem(SHOWN_KEY, JSON.stringify(Array.from(shown).slice(-200))); } catch {}
+        setMessages((m) => [
+          ...m,
+          ...fresh.map((f: any) => ({ role: "assistant" as const, content: `🔔 Reminder — ${f.text}` })),
+        ]);
+      } catch {
+        // best-effort; reminders are also delivered via Telegram
+      }
+    }
+    poll();
+    const iv = setInterval(poll, 60000);
+    return () => { stopped = true; clearInterval(iv); };
   }, []);
 
   function send() {

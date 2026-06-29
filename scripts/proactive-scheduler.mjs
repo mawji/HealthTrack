@@ -14,6 +14,7 @@ import crypto from "crypto";
 const ROOT = process.cwd();
 const CONFIG_PATH = path.join(ROOT, "data", "telegram", "config.json");
 const STATE_PATH = path.join(ROOT, "data", "proactive", "scheduler-state.json");
+const INTEL_PATH = path.join(ROOT, "data", "coach-intelligence.json");
 const APP_BASE = process.env.APP_BASE_URL || "http://127.0.0.1:3210";
 
 const BASE_INTERVAL_MS = 5 * 60 * 1000; // base loop: 5 min (med reminders need this granularity)
@@ -71,6 +72,11 @@ async function tick(count) {
   const med = await post("/api/medications/tick");
   if (med?.sent) console.log(`[proactive-scheduler] med reminders sent: ${med.sent}`);
 
+  // Dynamic user-set reminders ("remind me in an hour"): time-anchored like med
+  // reminders, so fire EVERY tick (5-min granularity) — never quiet-hours gated.
+  const rem = await post("/api/reminders/tick");
+  if (rem?.sent) console.log(`[proactive-scheduler] dynamic reminders sent: ${rem.sent}`);
+
   // The anti-nag proactive cycle is coarser — only every ~15 min.
   if (count % PROACTIVE_EVERY === 0) {
     // Nudges: let the engine decide; it no-ops when disabled/quiet/capped.
@@ -83,15 +89,29 @@ async function tick(count) {
 
     // Daily report: once per local day, at/after the report hour.
     const { date, hour } = localParts();
-    const state = readJson(STATE_PATH, { lastReportDate: null });
+    const state = readJson(STATE_PATH, { lastReportDate: null, lastReflectionDate: null });
     if (hour >= REPORT_HOUR && state.lastReportDate !== date) {
       const r = await post("/api/proactive/report");
       if (r?.sent) {
-        writeJson(STATE_PATH, { lastReportDate: date });
+        state.lastReportDate = date;
+        writeJson(STATE_PATH, state);
         console.log(`[proactive-scheduler] daily report sent for ${date}`);
       } else if (r && r.reason) {
         // Disabled/unpaired: mark the day done anyway so we don't retry all day.
-        writeJson(STATE_PATH, { lastReportDate: date });
+        state.lastReportDate = date;
+        writeJson(STATE_PATH, state);
+      }
+    }
+
+    // Nightly background-intelligence reflection: once per local day, at/after the
+    // configured quiet hour, only when enabled. Free + deterministic in Phase 1.
+    const intel = readJson(INTEL_PATH, { enabled: false, scheduleHour: 3 });
+    if (intel.enabled && hour >= Number(intel.scheduleHour ?? 3) && state.lastReflectionDate !== date) {
+      const w = await post("/api/coach/wellbeing?trigger=scheduled");
+      if (w) {
+        state.lastReflectionDate = date; // ran or skipped, don't retry all day
+        writeJson(STATE_PATH, state);
+        if (w.ran) console.log(`[proactive-scheduler] wellbeing reflection written for ${date}`);
       }
     }
   }

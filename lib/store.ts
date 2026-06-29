@@ -35,6 +35,29 @@ export function newId() {
 /** Timezone the user's health data lives in (device timezone, not server). */
 export const APP_TZ = process.env.APP_TZ || "Asia/Dubai";
 
+/** Current local date + clock time for the coach prompt, e.g.
+ *  "Monday 2026-06-29 21:27 (Asia/Dubai)". Unlike localDateStr this includes the
+ *  time and weekday, so the coach can resolve relative times ("in an hour",
+ *  "tonight") and weekly days when setting reminders. */
+export function localDateTimeStr(d = new Date(), timeZone = APP_TZ): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${g("weekday")} ${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")} (${timeZone})`;
+  } catch {
+    return localDateStr(d, timeZone);
+  }
+}
+
 export function localDateStr(d = new Date(), timeZone = APP_TZ): string {
   try {
     const formatter = new Intl.DateTimeFormat("en-US", {

@@ -27,7 +27,7 @@ const ALLOW = [
   "Caddyfile.example", "install.sh", "install.ps1",
   // Docker production deployment (todo #29): image + the deploy bundle customers fetch.
   "Dockerfile", ".dockerignore", "deploy",
-  "docs/readiness-scoring.md",
+  "docs/readiness-scoring.md", "docs/docker-install-sop.html",
   // Demo-mode showcase screenshots go here once captured. Real-data
   // screenshots must NEVER be added to this allowlist.
   // e.g. "docs/screenshots/today.png",

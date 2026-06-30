@@ -1,0 +1,19 @@
+# Keep the build context small & deterministic. The builder runs a fresh `npm ci`
+# and `next build`, so local node_modules / .next / data must not be shipped in.
+node_modules
+.next
+out
+data
+.git
+.github
+.claude
+deploy
+*.log
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.DS_Store
+coverage
+.vscode
+.idea

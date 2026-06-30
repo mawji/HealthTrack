@@ -25,6 +25,8 @@ const ALLOW = [
   "package.json", "package-lock.json", "tsconfig.json", "next.config.ts",
   ".gitignore", ".gitattributes", ".env.example", "README.md", "LICENSE",
   "Caddyfile.example", "install.sh", "install.ps1",
+  // Docker production deployment (todo #29): image + the deploy bundle customers fetch.
+  "Dockerfile", ".dockerignore", "deploy",
   "docs/readiness-scoring.md",
   // Demo-mode showcase screenshots go here once captured. Real-data
   // screenshots must NEVER be added to this allowlist.

@@ -29,6 +29,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, question: updated });
   }
 
+  // action "ack" — deterministically close the loop when the user has engaged
+  // with the question in chat, without waiting on the model to emit an
+  // answerQuestion block (which it doesn't always do). No memory is written here;
+  // the model's answerQuestion block, if it fires, still captures the durable
+  // fact and re-patches. Only acts while still pending so it never clobbers a
+  // richer answer the model already recorded.
+  if (action === "ack") {
+    if (q.status !== "pending") return NextResponse.json({ ok: true, question: q });
+    const answer = typeof body?.answer === "string" ? body.answer.trim() : "";
+    const updated = patchQuestion(id, {
+      status: "answered",
+      answer: answer || "(answered in chat)",
+      answeredAt: new Date().toISOString(),
+    });
+    return NextResponse.json({ ok: true, question: updated });
+  }
+
   if (action === "decline") {
     const topic = typeof body?.topic === "string" && body.topic ? body.topic : q.topic;
     addMemory({

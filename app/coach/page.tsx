@@ -515,6 +515,10 @@ export default function Coach() {
   const [liveFromIndex, setLiveFromIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // The open proactive question this session was seeded with (if any). Once the
+  // user replies, we deterministically mark it answered so the Daily card clears
+  // — without depending on the model emitting an answerQuestion block.
+  const seededQuestionId = useRef<string | null>(null);
 
   // Auto-grow the composer up to a few lines, then scroll within.
   useEffect(() => {
@@ -547,7 +551,11 @@ export default function Coach() {
   useEffect(() => {
     let cancelled = false;
     const seedIfOpen = (d: any) => {
-      if (!cancelled && d?.open?.prompt) {
+      if (cancelled) return;
+      // Track the open question's id even if the chat already has messages, so a
+      // reply later still closes the loop. Clear it if evaluate freed the slot.
+      seededQuestionId.current = d?.open?.id ?? seededQuestionId.current;
+      if (d?.open?.prompt) {
         setMessages((m) => (m.length === 0 ? [{ role: "assistant", content: d.open.prompt }] : m));
       }
     };
@@ -608,6 +616,20 @@ export default function Coach() {
     const text = raw.trim();
     if (!text || streaming) return;
     setInput("");
+    // Replying to a seeded proactive question closes the loop deterministically,
+    // so the Daily card clears even if the model never emits an answerQuestion
+    // block. The model's block (when it fires) still captures the durable memory.
+    const seededId = seededQuestionId.current;
+    if (seededId) {
+      seededQuestionId.current = null;
+      fetch("/api/coach/questions/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: seededId, action: "ack", answer: text }),
+      })
+        .then(() => { try { window.dispatchEvent(new Event("ht-question-changed")); } catch {} })
+        .catch(() => {});
+    }
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages([...next, { role: "assistant", content: "" }]);
     setStreaming(true);

@@ -33,8 +33,9 @@ function saveAll(rows: Conversation[]) {
   writeJson(FILE, rows);
 }
 
-/** A short title from the first user message (falls back to a generic label). */
-function deriveTitle(messages: ChatMessage[]): string {
+/** A short title from the first user message (falls back to a generic label).
+ *  Used as the instant title on create and whenever no AI title is available. */
+export function deriveTitle(messages: ChatMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user")?.content?.trim();
   if (!firstUser) return "New chat";
   const oneLine = firstUser.replace(/\s+/g, " ").slice(0, 60);
@@ -53,8 +54,10 @@ export function getConversation(id: string): Conversation | null {
 }
 
 /** Create or replace a conversation by id. Returns the saved conversation. An
- *  empty message list is ignored (nothing to save). The title is re-derived each
- *  save so it tracks the first user message. */
+ *  empty message list is ignored (nothing to save). On create the title is the
+ *  instant derived one; the POST route upgrades it to an AI-generated title and
+ *  it's then preserved across subsequent saves (the first user message — what the
+ *  derived title tracks — never changes anyway). */
 export function saveConversation(id: string | null | undefined, messages: ChatMessage[]): Conversation | null {
   const cleaned = (messages ?? []).filter((m) => m && typeof m.content === "string");
   // Don't persist a bare seeded question with no real exchange yet.
@@ -66,7 +69,7 @@ export function saveConversation(id: string | null | undefined, messages: ChatMe
 
   if (existing) {
     existing.messages = cleaned;
-    existing.title = deriveTitle(cleaned);
+    existing.title = existing.title || deriveTitle(cleaned);
     existing.updatedAt = now;
     saveAll(rows);
     return existing;
@@ -82,6 +85,18 @@ export function saveConversation(id: string | null | undefined, messages: ChatMe
   rows.push(conversation);
   saveAll(rows);
   return conversation;
+}
+
+/** Set a conversation's title (used by the route after AI title generation). */
+export function renameConversation(id: string, title: string): Conversation | null {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  const rows = getAll();
+  const c = rows.find((r) => r.id === id);
+  if (!c) return null;
+  c.title = trimmed;
+  saveAll(rows);
+  return c;
 }
 
 export function deleteConversation(id: string): boolean {

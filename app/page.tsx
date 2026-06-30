@@ -107,11 +107,14 @@ export default function Daily() {
     if (!date) return;
     if (!isSilent) setDayBusy(true);
     try {
+      // no-store: the auto-refresh re-requests the same URLs on a fixed interval,
+      // so without it the browser's HTTP cache can serve a stale body — the
+      // "Updated" time advances but the visuals don't, until a manual reload.
       const [healthRes, workoutsRes, goalsRes, waterRes] = await Promise.all([
-        fetch(`/api/health?view=today&date=${date}`).then((r) => r.json()),
-        fetch("/api/workouts?days=7").then((r) => r.json()),
-        fetch("/api/goals").then((r) => r.json()),
-        fetch(`/api/water?date=${date}`).then((r) => r.json()),
+        fetch(`/api/health?view=today&date=${date}`, { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/workouts?days=7", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/goals", { cache: "no-store" }).then((r) => r.json()),
+        fetch(`/api/water?date=${date}`, { cache: "no-store" }).then((r) => r.json()),
       ]);
 
       setData(healthRes);
@@ -121,8 +124,8 @@ export default function Daily() {
       setWater(waterRes);
 
       const [insightsRes, habitsRes] = await Promise.all([
-        fetch(`/api/daily-insights?date=${date}`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/habits?date=${date}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/daily-insights?date=${date}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/habits?date=${date}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
       ]);
       if (insightsRes) setInsights(insightsRes);
       if (habitsRes) setHabits(habitsRes);

@@ -46,8 +46,9 @@
   .shot{position:relative;margin:22px 0 4px}
   .shot img{width:100%;display:block;border:1px solid var(--hairline);border-radius:16px;box-shadow:var(--shadow)}
   .pin{position:absolute;transform:translate(-50%,-50%);width:27px;height:27px;border-radius:50%;
-    background:var(--heart);color:#fff;font:700 14px/27px var(--ui);text-align:center;
-    box-shadow:0 0 0 3px #fff,0 2px 7px rgba(0,0,0,.45);z-index:2}
+    background:color-mix(in srgb,var(--heart) 68%,transparent);color:#fff;font:700 14px/27px var(--ui);
+    text-align:center;box-shadow:0 0 0 2px rgba(255,255,255,.6),0 2px 7px rgba(0,0,0,.3);
+    z-index:2;opacity:.82}
   .calls{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:9px}
   .calls li{position:relative;padding-left:36px;font-size:15.5px;color:var(--ink-soft);margin:0}
   .calls li b{color:var(--ink)}

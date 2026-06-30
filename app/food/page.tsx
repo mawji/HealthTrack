@@ -374,13 +374,10 @@ export default function Food() {
             {per100g && (
               <div style={{ marginTop: 12 }}>
                 <PickerField label="Serving (g) — adjust to what you ate">
-                  <input
-                    className="field"
-                    type="number"
-                    inputMode="decimal"
+                  <PortionInput
                     value={servingG ?? 100}
                     style={{ padding: "8px 10px", marginTop: 3 }}
-                    onChange={(e) => setServing(Math.max(1, Number(e.target.value) || 1))}
+                    onCommit={setServing}
                   />
                 </PickerField>
               </div>
@@ -732,16 +729,64 @@ function PickerField({ label, children }: { label: string; children: React.React
 
 function MacroInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
-    <label style={{ flex: 1 }}>
+    // minWidth:0 lets these five number inputs shrink to fit a phone width
+    // instead of forcing a horizontal scroll on the meal-analysis card.
+    <label style={{ flex: 1, minWidth: 0 }}>
       <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
       <input
         className="field"
         type="number"
         value={value}
-        style={{ padding: "8px 10px", marginTop: 3 }}
+        style={{ padding: "8px 10px", marginTop: 3, minWidth: 0 }}
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
+  );
+}
+
+/** Number field for an editable amount (grams) that lets you fully clear it
+ *  while typing — a controlled `value={number}` would snap an empty field back
+ *  to 1 on every keystroke. Keeps a local string draft, commits a valid number
+ *  as you type, and clamps to ≥1 on blur. */
+function PortionInput({
+  value,
+  onCommit,
+  ariaLabel,
+  style,
+}: {
+  value: number;
+  onCommit: (grams: number) => void;
+  ariaLabel?: string;
+  style?: React.CSSProperties;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    // Resync when the parent value changes (e.g. a rescale rounds it), but don't
+    // clobber an in-progress edit that already parses to the same number.
+    if (Number(draft) !== value) setDraft(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <input
+      className="field"
+      type="number"
+      inputMode="decimal"
+      value={draft}
+      aria-label={ariaLabel}
+      style={style}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        if (raw === "") return; // allow an empty field mid-edit
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 1) onCommit(n);
+      }}
+      onBlur={() => {
+        const n = Math.max(1, Math.round(Number(draft) || 1));
+        setDraft(String(n));
+        onCommit(n);
+      }}
+    />
   );
 }
 
@@ -854,14 +899,11 @@ function ComponentList({
               {isUsda(c) ? "USDA" : confidence ? `AI · ${confidence}` : "AI"}
             </span>
             <label style={{ flex: "none", display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                className="field"
-                type="number"
-                inputMode="decimal"
+              <PortionInput
                 value={c.portionG}
-                aria-label={`${c.name} grams`}
+                ariaLabel={`${c.name} grams`}
                 style={{ width: 64, padding: "6px 8px", textAlign: "right" }}
-                onChange={(e) => onPortionChange(i, Math.max(1, Number(e.target.value) || 1))}
+                onCommit={(g) => onPortionChange(i, g)}
               />
               <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>g</span>
             </label>

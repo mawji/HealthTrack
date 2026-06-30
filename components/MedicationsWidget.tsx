@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MedicationsPayload, MedicationDefinition, MedicationDayStatus } from "@/lib/types";
-import { BUCKETS, BucketKey, bucketForTime, doseState, mergeStates, CellState, STATE_COLOR } from "@/lib/medication-display";
+import { BUCKETS, BucketKey, bucketForTime, doseState, mergeStates, CellState } from "@/lib/medication-display";
 
 export default function MedicationsWidget({ date }: { date: string | undefined }) {
   const [payload, setPayload] = useState<MedicationsPayload | null>(null);
@@ -123,10 +123,31 @@ export default function MedicationsWidget({ date }: { date: string | undefined }
         {bucketCells.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${bucketCells.length}, 1fr)`, gap: 8, marginBottom: 14 }}>
             {bucketCells.map((c) => {
-              const allTaken = c.state === "taken";
+              // "Done" means every dose in the compartment is actually taken —
+              // not mergeStates' lean-done (which the weekly strip wants but
+              // would paint a 1-of-2 box fully green here).
+              const allTaken = c.total > 0 && c.taken === c.total;
               const due = c.state === "due";
               const clickable = c.pending > 0;
-              const color = STATE_COLOR[c.state];
+              const fill = "var(--activity)";
+              const pct = c.total > 0 ? (c.taken / c.total) * 100 : 0;
+              const partial = c.taken > 0 && !allTaken;
+              // Unfilled remainder tints red when something's due, else plain inset.
+              const rest = due ? "color-mix(in srgb, var(--heart) 12%, var(--bg-inset))" : "var(--bg-inset)";
+              const background = allTaken
+                ? fill
+                : partial
+                ? `linear-gradient(to right, ${fill} ${pct}%, ${rest} ${pct}%)`
+                : due
+                ? "color-mix(in srgb, var(--heart) 14%, transparent)"
+                : "var(--bg-inset)";
+              const border = allTaken
+                ? fill
+                : due
+                ? "var(--heart)"
+                : partial
+                ? `color-mix(in srgb, ${fill} 45%, var(--hairline))`
+                : "var(--hairline)";
               return (
                 <button
                   key={c.bucket.key}
@@ -142,9 +163,9 @@ export default function MedicationsWidget({ date }: { date: string | undefined }
                     padding: "10px 4px",
                     borderRadius: 12,
                     cursor: clickable ? "pointer" : "default",
-                    border: `1px solid ${allTaken ? color : due ? color : "var(--hairline)"}`,
-                    background: allTaken ? color : due ? `color-mix(in srgb, ${color} 14%, transparent)` : "var(--bg-inset)",
-                    color: allTaken ? "var(--bg)" : due ? color : "var(--ink)",
+                    border: `1px solid ${border}`,
+                    background,
+                    color: allTaken ? "var(--bg)" : due ? "var(--heart)" : "var(--ink)",
                   }}
                 >
                   <span style={{ fontSize: 16 }} aria-hidden>{c.bucket.icon}</span>

@@ -6,6 +6,7 @@ import { IconChip, HeartIcon, ScaleIcon, LungsIcon } from "@/components/icons";
 import SharingPanel from "./SharingPanel";
 import ProfilePanel from "./ProfilePanel";
 import IntelligencePanel from "./IntelligencePanel";
+import UpdateBanner from "@/components/UpdateBanner";
 
 type SettingsTab = "profile" | "integrations" | "ai" | "intelligence" | "telegram" | "sharing" | "preferences" | "archive";
 const TAB_KEYS: SettingsTab[] = ["profile", "integrations", "ai", "intelligence", "telegram", "sharing", "preferences", "archive"];
@@ -1290,6 +1291,8 @@ export default function Settings() {
         <h1 className="page-title">Settings.</h1>
         <p className="page-sub">Connection, permissions, and app preferences.</p>
       </header>
+
+      <UpdateBanner />
 
       {!data ? (
         <p className="pulsing" style={{ color: "var(--ink-soft)" }}>Loading…</p>

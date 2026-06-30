@@ -177,6 +177,14 @@ export default function AvatarMenu() {
                   <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />
                 </svg>
               } />
+              <a href="/guide.html" target="_blank" rel="noopener" onClick={() => setOpen(false)} className="row" style={{ gap: 9, padding: "9px 10px", borderRadius: 10, textDecoration: "none", color: "var(--ink)", fontSize: 13.5, fontWeight: 600 }}>
+                <span style={{ color: "var(--ink-soft)", display: "flex" }}>
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" /><path d="M9.6 9.2a2.4 2.4 0 1 1 3.3 2.3c-.7.3-1.3.9-1.3 1.7v.4" /><circle cx="12" cy="16.6" r=".6" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                How to use
+              </a>
             </div>
           </div>
         </>

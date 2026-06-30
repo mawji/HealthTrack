@@ -65,6 +65,16 @@ export default function Sidebar() {
         </Link>
       ))}
       <div className="side-foot">
+        <a href="/guide.html" target="_blank" rel="noopener" className="side-link" title="How to use HealthTrack">
+          <span className="side-icon" style={{ background: "color-mix(in srgb, var(--breath) 16%, transparent)", color: "var(--breath)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9.6 9.2a2.4 2.4 0 1 1 3.3 2.3c-.7.3-1.3.9-1.3 1.7v.4" />
+              <circle cx="12" cy="16.6" r=".6" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          How to use
+        </a>
         <Link href="/settings" className={`side-link ${pathname === "/settings" ? "active" : ""}`}>
           <span className="side-icon" style={{ background: "color-mix(in srgb, var(--ink) 9%, transparent)", color: "var(--ink-soft)" }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

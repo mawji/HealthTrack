@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HealthTrack — How to use your app</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#faf7f2; --raised:#ffffff; --inset:#f3efe8; --ink:#211f1a; --ink-soft:#6f6a5e;
+    --ink-faint:#a8a294; --hairline:#eae4d9;
+    --activity:#2e8f5c; --heart:#e25c4a; --sleep:#5b6abf; --food:#c98a2b; --breath:#3a93a3;
+    --shadow:0 1px 2px rgba(60,50,30,.04), 0 8px 28px rgba(60,50,30,.07);
+    --display:'Fraunces',Georgia,serif; --ui:'Instrument Sans',system-ui,sans-serif;
+    --maxw:760px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.65 var(--ui);
+    -webkit-font-smoothing:antialiased;}
+  .shell{max-width:var(--maxw);margin:0 auto;padding:0 22px 120px}
+  /* header */
+  header.top{display:flex;align-items:center;gap:11px;padding:26px 0 8px;position:sticky;top:0;
+    background:linear-gradient(var(--bg) 78%,transparent);z-index:5}
+  .logo{display:flex;gap:3px;align-items:flex-end;height:26px}
+  .logo span{width:5px;border-radius:3px;display:block}
+  .word{font-family:var(--display);font-weight:700;font-size:21px;letter-spacing:-.01em}
+  .word .t{color:var(--heart)}
+  /* hero */
+  .hero{padding:40px 0 8px;border-bottom:1px solid var(--hairline);margin-bottom:8px}
+  .kicker{color:var(--activity);font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+  h1{font-family:var(--display);font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-.02em;margin:10px 0 12px}
+  .lede{font-size:19px;color:var(--ink-soft);margin:0 0 18px}
+  h2{font-family:var(--display);font-weight:600;font-size:27px;letter-spacing:-.01em;margin:54px 0 6px;scroll-margin-top:80px}
+  h3{font-family:var(--display);font-weight:600;font-size:20px;margin:26px 0 6px}
+  p{margin:13px 0}
+  a{color:var(--activity);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--activity) 35%,transparent)}
+  ul,ol{margin:13px 0;padding-left:22px} li{margin:8px 0}
+  .lead-num{color:var(--heart);font-family:var(--display);font-weight:700}
+  figure{margin:22px 0}
+  figure img{width:100%;border:1px solid var(--hairline);border-radius:18px;box-shadow:var(--shadow);display:block}
+  figcaption{font-size:14px;color:var(--ink-faint);margin-top:9px;text-align:center}
+  .card{background:var(--raised);border:1px solid var(--hairline);border-radius:18px;padding:18px 22px;margin:18px 0;box-shadow:var(--shadow)}
+  .pill{display:inline-block;font-size:13px;font-weight:600;padding:3px 11px;border-radius:999px;margin:0 4px 4px 0}
+  .p-act{color:var(--activity);background:color-mix(in srgb,var(--activity) 13%,var(--raised))}
+  .p-heart{color:var(--heart);background:color-mix(in srgb,var(--heart) 13%,var(--raised))}
+  .p-sleep{color:var(--sleep);background:color-mix(in srgb,var(--sleep) 13%,var(--raised))}
+  .p-food{color:var(--food);background:color-mix(in srgb,var(--food) 14%,var(--raised))}
+  .p-breath{color:var(--breath);background:color-mix(in srgb,var(--breath) 14%,var(--raised))}
+  .tip{border-left:3px solid var(--activity);background:var(--inset);border-radius:0 14px 14px 0;padding:13px 17px;margin:18px 0;font-size:15.5px}
+  .tip b{color:var(--ink)}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 4px}
+  .toc a{font-size:14px;background:var(--raised);border:1px solid var(--hairline);border-radius:999px;padding:6px 13px;color:var(--ink-soft)}
+  .toc a:hover{color:var(--ink)}
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--hairline);color:var(--ink-faint);font-size:14px}
+  @media (max-width:640px){h1{font-size:32px}.shell{padding:0 16px 90px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="top">
+  <span class="logo" aria-hidden="true">
+    <span style="height:17px;background:#94a1f2"></span>
+    <span style="height:24px;background:#56c8d8"></span>
+    <span style="height:26px;background:#ff6f61"></span>
+    <span style="height:22px;background:#3dd68c"></span>
+    <span style="height:14px;background:#f0b25a"></span>
+  </span>
+  <span class="word">Health<span class="t">Track</span></span>
+</header>
+
+<section class="hero">
+  <div class="kicker">How to use your app</div>
+  <h1>Welcome to HealthTrack</h1>
+  <p class="lede">Your body, beautifully measured. This short guide walks you through what each part of
+  the app does and how to get the most from it — your dashboard, logging, your AI coach, trends, and a
+  few settings worth knowing.</p>
+  <div class="toc">
+    <a href="#dash">Your dashboard</a>
+    <a href="#log">Logging anything</a>
+    <a href="#coach">Your AI coach</a>
+    <a href="#trends">Trends</a>
+    <a href="#track">Goals, habits &amp; meds</a>
+    <a href="#settings">Settings</a>
+    <a href="#install">Install on your phone</a>
+  </div>
+</section>
+
+<h2 id="dash">Your dashboard — the Daily screen</h2>
+<p>The <b>Daily</b> screen is home. It pulls together everything from today in one calm view: your
+movement, workouts, hydration, habits, sleep, and recovery — each with a plain-English read on how
+you're doing. Scroll down for the full day; the cards group naturally so each insight sits next to the
+data behind it.</p>
+<figure>
+  <img src="guide/today.png" alt="The HealthTrack Daily dashboard showing steps, sleep, heart and recovery." />
+  <figcaption>The Daily screen — your whole day at a glance.</figcaption>
+</figure>
+<p>A few things to notice:</p>
+<ul>
+  <li><span class="pill p-act">Movement</span> steps, active minutes and calories against your daily goals.</li>
+  <li><span class="pill p-heart">Recovery</span> a <b>readiness score</b> (0–100) that blends your heart-rate variability, resting heart rate and sleep versus your own recent baseline.</li>
+  <li><span class="pill p-sleep">Sleep</span> a stage-by-stage view of last night.</li>
+  <li><b>Exercise snacks</b> at the top — small circles for short bursts of brisk movement through the day; tap one when you've done a minute.</li>
+</ul>
+<div class="tip"><b>Tip:</b> the short notes under each section only appear when something's worth your
+attention — a quiet day stays quiet on purpose.</div>
+
+<h2 id="log">Logging anything — three easy ways</h2>
+<p>You rarely have to fill in a form. There are three ways to record what you eat, drink, or do:</p>
+<h3>1 · The Food screen</h3>
+<p>Snap a photo of a meal, scan a barcode, search a food, or just describe it — HealthTrack estimates
+the calories and macros and logs it for you.</p>
+<figure>
+  <img src="guide/food.png" alt="The Food screen with photo, barcode, search and describe options." />
+  <figcaption>Photograph a meal, scan a barcode, or describe it in words.</figcaption>
+</figure>
+<h3>2 · The "+ Log" button</h3>
+<p>The <b>+ Log</b> button (bottom-right on every screen) is a quick menu for activity, hydration,
+weight, blood pressure, glucose and more — tap, type a number, done.</p>
+<h3>3 · Just tell your coach</h3>
+<p>Type <i>"logged a 30-minute walk"</i> or <i>"2 glasses of water"</i> to your coach and it records it
+— the same as if you'd filled in a form. More on that next.</p>
+
+<h2 id="coach">Your AI coach</h2>
+<p>The <b>Coach</b> is the heart of HealthTrack. Ask it anything about your health and it answers using
+<i>your</i> numbers — trends, sleep, workouts, labs, medications. It can also log things for you, and
+its advice is grounded in published guidance, kept conservative, and always defers medical decisions to
+your clinician.</p>
+<figure>
+  <img src="guide/coach.png" alt="The Coach screen with suggested questions and a message box." />
+  <figcaption>Ask in plain language — or tap a suggestion to start.</figcaption>
+</figure>
+<p>Try things like <i>"How is my weight trending?"</i>, <i>"Is my resting heart rate creeping up?"</i>,
+or <i>"What should I eat after this workout?"</i> You can also talk to it — tap the microphone — and it
+remembers useful context about you between conversations.</p>
+<div class="tip"><b>Good to know:</b> the coach runs on the AI model you choose in Settings. A larger
+cloud model gives the best answers; you can also run a fully private local model. Either way, your
+health data stays on your own machine.</div>
+
+<h2 id="trends">Trends — the bigger picture</h2>
+<p>The <b>Trends</b> screen zooms out to weeks and months: steps, weight, resting heart rate, sleep,
+HRV and more, each as a clean chart with your goal lines overlaid. Switch between week, month, and
+longer ranges to see where things are heading — and get a short written summary of the current week or
+month on request.</p>
+<figure>
+  <img src="guide/trends.png" alt="The Trends screen with charts for steps, weight, heart rate and more." />
+  <figcaption>Your metrics over time, with goals overlaid.</figcaption>
+</figure>
+
+<h2 id="track">Goals, habits &amp; medications</h2>
+<p>Three more places worth a visit from the sidebar:</p>
+<ul>
+  <li><b>Goals</b> — set targets that matter to you (weight, steps, resting heart rate, key lab numbers). They show up on Daily and Trends and your coach treats them as the bar to hit.</li>
+  <li><b>Habits</b> — build your own "do more" or "do less" habits (read 10 minutes, limit coffee), with streaks and progress.</li>
+  <li><b>Meds</b> — track medications and supplements with reminders and adherence; your coach factors them into timing advice (never dosing).</li>
+</ul>
+
+<h2 id="settings">Settings — connect your data &amp; pick your coach</h2>
+<p>Open <b>Settings</b> to set everything up. The two that matter most are under their own tabs:</p>
+<figure>
+  <img src="guide/settings.png" alt="The Settings screen showing Integrations and Connect Google Health." />
+  <figcaption>Settings → Integrations → Connect Google Health.</figcaption>
+</figure>
+<ul>
+  <li><span class="lead-num">1</span> &nbsp;<b>Integrations → Connect Google Health.</b> This brings in your steps, heart rate, sleep, workouts and measurements. A one-time sign-in.</li>
+  <li><span class="lead-num">2</span> &nbsp;<b>AI Assistant → choose your coach's model.</b> Connect a ChatGPT subscription with a one-time code, paste an API key for any provider, or use the bundled local model. A cloud model is recommended for the best coaching.</li>
+</ul>
+<p>Other tabs let you set your profile, turn on Telegram reminders, manage what you share, and control
+background "intelligence" — all optional.</p>
+
+<h2 id="install">Install it on your phone &amp; computer</h2>
+<p>HealthTrack installs like a normal app — no app store needed:</p>
+<div class="card">
+  <p><b>Phone:</b> open your HealthTrack address in the browser. On <b>Android (Chrome)</b>, tap the
+  menu → <b>Install app</b>. On <b>iPhone (Safari)</b>, tap Share → <b>Add to Home Screen</b>.</p>
+  <p><b>Computer:</b> open it in Chrome or Edge and click the <b>install icon</b> in the address bar.</p>
+  <p style="margin-bottom:0">It then opens full-screen with its own icon and stays signed in.</p>
+</div>
+<div class="tip"><b>If a screen won't load away from home:</b> make sure the Tailscale app is running and
+signed in on that device — it's what privately and securely connects you to your HealthTrack. Your
+setup contact can help if you're unsure.</div>
+
+<footer>
+  HealthTrack — your body, beautifully measured. Everything here stays on your own machine.
+  Screens shown use sample data.
+</footer>
+</div>
+</body>
+</html>

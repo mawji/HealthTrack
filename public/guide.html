@@ -65,6 +65,16 @@
   .tip{border-left:3px solid var(--activity);background:var(--inset);border-radius:0 14px 14px 0;padding:13px 17px;margin:18px 0;font-size:15.5px}
   .tip b{color:var(--ink)}
   .tip.warn{border-color:var(--heart)}
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:7px 9px;margin:16px 0;padding:14px 16px;
+    background:var(--inset);border:1px solid var(--hairline);border-radius:14px;font-size:14.5px;color:var(--ink-soft)}
+  .chain b{color:var(--ink)}
+  .chain .ar{color:var(--ink-faint);font-weight:700}
+  .plat{margin:14px 0}
+  .plat h4{font-family:var(--display);font-weight:600;font-size:18px;margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
+  .t-android{color:var(--activity);background:color-mix(in srgb,var(--activity) 14%,var(--raised))}
+  .t-ios{color:var(--sleep);background:color-mix(in srgb,var(--sleep) 14%,var(--raised))}
+  .plat ol,.plat ul{margin:10px 0 0}
   .steps{counter-reset:step;list-style:none;padding:0;margin:18px 0}
   .steps>li{position:relative;padding:2px 0 2px 46px;margin:16px 0;min-height:30px}
   .steps>li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0;
@@ -104,6 +114,7 @@
   on, then every screen, and finally the quiet work it does in the background.</p>
   <div class="toc">
     <a href="#quickstart">Start here (5 min)</a>
+    <a href="#wearable">Connect your wearable</a>
     <a href="#settings">Every setting</a>
     <a href="#screens">Your screens</a>
     <a href="#background">In the background</a>
@@ -140,6 +151,9 @@ app on. Do them in order and you'll get value from your very first day.</p>
   <li><span class="n">2</span><b>Connection status.</b> Shows whether HealthTrack is linked to Google Health yet.</li>
   <li><span class="n">3</span><b>Connect Google Health.</b> Tap, sign in once, and your dashboard fills in. Until you do, the app runs on demo data.</li>
 </ol>
+<div class="tip"><b>Nothing showing up after connecting?</b> HealthTrack reads your data from your
+<i>Google account</i>, so your watch has to be feeding Google first. The next section has the exact
+steps for your device.</div>
 
 <h3>2 · Settings → AI Assistant → pick your coach's brain</h3>
 <div class="shot">
@@ -170,6 +184,66 @@ targets you'll see on Daily, Food and Trends. The optional <b>conditions</b> fie
 high cholesterol) lets the coach keep its advice relevant and conservative.</p>
 <p>That's the essential setup. The remaining tabs — Intelligence, Telegram, Sharing, Preferences and
 Data &amp; Storage — are all optional and explained next.</p>
+
+<!-- ============================ WEARABLE ============================ -->
+<h2 id="wearable">Connect your wearable</h2>
+<p>HealthTrack reads your numbers from your <b>Google account</b> — it doesn't talk to your watch
+directly. So the one-time job is to get your watch's data <i>into Google</i>, then tap
+<b>Connect Google Health</b> (above). The bridge on your phone is the free <b>Google Health</b> app —
+the rebranded Fitbit app. Here's the chain, then the exact path for the popular devices.</p>
+<div class="chain">
+  <b>Your watch</b> <span class="ar">→</span> your phone's health hub <span class="ar">→</span>
+  the <b>Google Health</b> app <span class="ar">→</span> your <b>Google account</b>
+  <span class="ar">→</span> <b>HealthTrack</b>
+</div>
+
+<div class="card plat">
+  <h4>Samsung Galaxy Watch <span class="tag t-android">Android phone</span></h4>
+  <ol>
+    <li>In <b>Samsung Health</b> → <b>Settings → Health Connect</b>, turn on syncing so your watch's data is written to Health Connect (the on-device hub).</li>
+    <li>Install the <b>Google Health</b> app and sign in with your Google account.</li>
+    <li>In <b>Google Health → Connections → Partner apps → Sync your favorite health apps → Set up</b>, accept the terms and choose the data types (steps, heart rate, sleep, weight…).</li>
+    <li>Back in HealthTrack, open <b>Settings → Integrations → Connect Google Health</b>.</li>
+  </ol>
+</div>
+
+<div class="card plat">
+  <h4>Apple Watch <span class="tag t-ios">iPhone</span></h4>
+  <ol>
+    <li>Your Apple Watch already writes to <b>Apple Health</b> — nothing to set up there.</li>
+    <li>Install the <b>Google Health</b> app (iOS 16.4+) and sign in with your Google account.</li>
+    <li>In <b>Google Health → Connections → Apps and services → Apple Health → Get started</b>, grant the health categories you want synced.</li>
+    <li>Back in HealthTrack, open <b>Settings → Integrations → Connect Google Health</b>.</li>
+  </ol>
+</div>
+
+<div class="card plat">
+  <h4>Fitbit &amp; Pixel Watch <span class="tag t-android">Android</span> <span class="tag t-ios">iPhone</span></h4>
+  <ol>
+    <li>Migrate your Fitbit account to Google: in the <b>Fitbit / Google Health</b> app → <b>Profile / Settings → Move account</b>. Google now requires this.</li>
+    <li>Once migrated, the device syncs <b>straight to your Google account</b> — you don't need Health Connect or Apple Health at all.</li>
+    <li>Back in HealthTrack, open <b>Settings → Integrations → Connect Google Health</b>.</li>
+  </ol>
+</div>
+
+<div class="card plat">
+  <h4>Other wearables <span class="tag t-android">Android</span> <span class="tag t-ios">iPhone</span></h4>
+  <p style="margin:2px 0 0;font-size:15px;color:var(--ink-soft)">Garmin, Oura, Whoop, Wear OS and most others follow the same idea — get the data into your Google account, then connect.</p>
+  <ul>
+    <li><b>On Android:</b> open the device's own app (Garmin Connect, etc.), turn on its <b>Health Connect</b> integration, then do the <b>Google Health → Partner apps</b> steps from the Samsung path above.</li>
+    <li><b>On iPhone:</b> make sure the device's app writes to <b>Apple Health</b>, then link Apple Health inside the <b>Google Health</b> app as in the Apple Watch path above.</li>
+    <li>Finish with <b>Settings → Integrations → Connect Google Health</b> in HealthTrack.</li>
+  </ul>
+</div>
+
+<div class="tip warn"><b>Good to know on iPhone:</b> the Apple Health → Google link is one-way and
+read-only, currently shows about three months of history, and food or water you log in HealthTrack
+won't appear back in Apple Health. Fitbit and Pixel Watch skip Apple Health entirely. If a device
+only syncs to its own brand cloud and never to Apple Health (and isn't a Fitbit/Pixel), there's no
+clean iPhone route into Google Health today.</div>
+<div class="tip"><b>Two apps double-counting?</b> When more than one app writes the same metric (say
+steps), pick which one wins in <b>Google Health → View sources</b> (and, on Android, Health Connect's
+per-app priority).</div>
 
 <!-- ============================ SETTINGS ============================ -->
 <h2 id="settings">Every setting, explained</h2>

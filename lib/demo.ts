@@ -122,7 +122,10 @@ export function demoDay(date: string): DaySummary {
     spo2: Math.round((95.5 + rnd() * 2.5) * 10) / 10,
     hrv: Math.round(38 + rnd() * 22),
     breathingRate: Math.round((14 + rnd() * 2.6) * 10) / 10,
-    weightKg: Math.round((76.4 - n * 0.004 + rnd() * 0.6) * 10) / 10,
+    // Gentle, bounded drift around ~76 kg (slow multi-month wave + small daily
+    // noise). NB: `n` is the absolute epoch-day number, so a linear `n * k`
+    // term runs away to absurd values — keep the trend periodic, not linear.
+    weightKg: Math.round((76.4 + Math.sin(n / 45) * 1.1 + rnd() * 0.5) * 10) / 10,
     caloriesIn: Math.round(1750 + rnd() * 500),
   };
 }

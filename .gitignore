@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-demo/
 out/
 data/
 .env.local

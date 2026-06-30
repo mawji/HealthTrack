@@ -14,7 +14,7 @@
     --activity:#2e8f5c; --heart:#e25c4a; --sleep:#5b6abf; --food:#c98a2b; --breath:#3a93a3;
     --shadow:0 1px 2px rgba(60,50,30,.04), 0 8px 28px rgba(60,50,30,.07);
     --display:'Fraunces',Georgia,serif; --ui:'Instrument Sans',system-ui,sans-serif;
-    --maxw:760px;
+    --maxw:780px;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -22,26 +22,38 @@
     -webkit-font-smoothing:antialiased;}
   .shell{max-width:var(--maxw);margin:0 auto;padding:0 22px 120px}
   /* header */
-  header.top{display:flex;align-items:center;gap:11px;padding:26px 0 8px;position:sticky;top:0;
+  header.top{display:flex;align-items:center;gap:11px;padding:24px 0 8px;position:sticky;top:0;
     background:linear-gradient(var(--bg) 78%,transparent);z-index:5}
   .logo{display:flex;gap:3px;align-items:flex-end;height:26px}
   .logo span{width:5px;border-radius:3px;display:block}
   .word{font-family:var(--display);font-weight:700;font-size:21px;letter-spacing:-.01em}
   .word .t{color:var(--heart)}
   /* hero */
-  .hero{padding:40px 0 8px;border-bottom:1px solid var(--hairline);margin-bottom:8px}
+  .hero{padding:36px 0 8px;border-bottom:1px solid var(--hairline);margin-bottom:8px}
   .kicker{color:var(--activity);font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
   h1{font-family:var(--display);font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-.02em;margin:10px 0 12px}
   .lede{font-size:19px;color:var(--ink-soft);margin:0 0 18px}
-  h2{font-family:var(--display);font-weight:600;font-size:27px;letter-spacing:-.01em;margin:54px 0 6px;scroll-margin-top:80px}
-  h3{font-family:var(--display);font-weight:600;font-size:20px;margin:26px 0 6px}
+  h2{font-family:var(--display);font-weight:600;font-size:27px;letter-spacing:-.01em;margin:60px 0 6px;scroll-margin-top:78px;padding-top:8px}
+  h3{font-family:var(--display);font-weight:600;font-size:20px;margin:30px 0 4px}
+  .eyebrow{color:var(--ink-faint);font-weight:600;font-size:12.5px;letter-spacing:.07em;text-transform:uppercase;margin:46px 0 -6px;scroll-margin-top:78px}
   p{margin:13px 0}
   a{color:var(--activity);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--activity) 35%,transparent)}
-  ul,ol{margin:13px 0;padding-left:22px} li{margin:8px 0}
-  .lead-num{color:var(--heart);font-family:var(--display);font-weight:700}
-  figure{margin:22px 0}
-  figure img{width:100%;border:1px solid var(--hairline);border-radius:18px;box-shadow:var(--shadow);display:block}
-  figcaption{font-size:14px;color:var(--ink-faint);margin-top:9px;text-align:center}
+  ul,ol{margin:13px 0;padding-left:22px} li{margin:7px 0}
+  /* figures + annotations */
+  figure{margin:22px 0 8px}
+  figure img{width:100%;border:1px solid var(--hairline);border-radius:16px;box-shadow:var(--shadow);display:block}
+  figcaption{font-size:13.5px;color:var(--ink-faint);margin-top:9px;text-align:center}
+  .shot{position:relative;margin:22px 0 4px}
+  .shot img{width:100%;display:block;border:1px solid var(--hairline);border-radius:16px;box-shadow:var(--shadow)}
+  .pin{position:absolute;transform:translate(-50%,-50%);width:27px;height:27px;border-radius:50%;
+    background:var(--heart);color:#fff;font:700 14px/27px var(--ui);text-align:center;
+    box-shadow:0 0 0 3px #fff,0 2px 7px rgba(0,0,0,.45);z-index:2}
+  .calls{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:9px}
+  .calls li{position:relative;padding-left:36px;font-size:15.5px;color:var(--ink-soft);margin:0}
+  .calls li b{color:var(--ink)}
+  .calls .n{position:absolute;left:0;top:1px;width:25px;height:25px;border-radius:50%;
+    background:var(--heart);color:#fff;font:700 13px/25px var(--ui);text-align:center}
+  /* components */
   .card{background:var(--raised);border:1px solid var(--hairline);border-radius:18px;padding:18px 22px;margin:18px 0;box-shadow:var(--shadow)}
   .pill{display:inline-block;font-size:13px;font-weight:600;padding:3px 11px;border-radius:999px;margin:0 4px 4px 0}
   .p-act{color:var(--activity);background:color-mix(in srgb,var(--activity) 13%,var(--raised))}
@@ -51,11 +63,22 @@
   .p-breath{color:var(--breath);background:color-mix(in srgb,var(--breath) 14%,var(--raised))}
   .tip{border-left:3px solid var(--activity);background:var(--inset);border-radius:0 14px 14px 0;padding:13px 17px;margin:18px 0;font-size:15.5px}
   .tip b{color:var(--ink)}
+  .tip.warn{border-color:var(--heart)}
+  .steps{counter-reset:step;list-style:none;padding:0;margin:18px 0}
+  .steps>li{position:relative;padding:2px 0 2px 46px;margin:16px 0;min-height:30px}
+  .steps>li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0;
+    width:31px;height:31px;border-radius:50%;background:var(--heart);color:#fff;
+    font-family:var(--display);font-weight:700;font-size:16px;line-height:31px;text-align:center}
+  .steps b{font-size:17px}
   .toc{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 4px}
   .toc a{font-size:14px;background:var(--raised);border:1px solid var(--hairline);border-radius:999px;padding:6px 13px;color:var(--ink-soft)}
   .toc a:hover{color:var(--ink)}
   footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--hairline);color:var(--ink-faint);font-size:14px}
-  @media (max-width:640px){h1{font-size:32px}.shell{padding:0 16px 90px}}
+  @media (max-width:640px){
+    h1{font-size:32px}.shell{padding:0 15px 90px}
+    .pin{width:22px;height:22px;font-size:11.5px;line-height:22px;box-shadow:0 0 0 2px #fff,0 2px 5px rgba(0,0,0,.4)}
+    .calls li{font-size:15px}
+  }
 </style>
 </head>
 <body>
@@ -74,102 +97,365 @@
 <section class="hero">
   <div class="kicker">How to use your app</div>
   <h1>Welcome to HealthTrack</h1>
-  <p class="lede">Your body, beautifully measured. This short guide walks you through what each part of
-  the app does and how to get the most from it — your dashboard, logging, your AI coach, trends, and a
-  few settings worth knowing.</p>
+  <p class="lede">Your body, beautifully measured. HealthTrack pulls your steps, heart, sleep,
+  workouts and labs into one calm dashboard, and gives you an AI coach who knows <i>your</i>
+  numbers. This guide walks you through it — starting with the few settings that switch everything
+  on, then every screen, and finally the quiet work it does in the background.</p>
   <div class="toc">
-    <a href="#dash">Your dashboard</a>
-    <a href="#log">Logging anything</a>
-    <a href="#coach">Your AI coach</a>
-    <a href="#trends">Trends</a>
-    <a href="#track">Goals, habits &amp; meds</a>
-    <a href="#settings">Settings</a>
-    <a href="#install">Install on your phone</a>
+    <a href="#quickstart">Start here (5 min)</a>
+    <a href="#settings">Every setting</a>
+    <a href="#screens">Your screens</a>
+    <a href="#background">In the background</a>
+    <a href="#logging">Logging anything</a>
+    <a href="#install">Install it</a>
   </div>
+  <div class="tip" style="margin-top:22px"><b>Everything stays on your machine.</b> Your health data
+  is stored locally and never leaves your device — the only thing that ever goes out is the message
+  you send to the AI model you choose. Screens in this guide use sample data.</div>
 </section>
 
-<h2 id="dash">Your dashboard — the Daily screen</h2>
-<p>The <b>Daily</b> screen is home. It pulls together everything from today in one calm view: your
-movement, workouts, hydration, habits, sleep, and recovery — each with a plain-English read on how
-you're doing. Scroll down for the full day; the cards group naturally so each insight sits next to the
-data behind it.</p>
+<!-- ============================ QUICK START ============================ -->
+<h2 id="quickstart">Start here — five minutes to a working app</h2>
+<p>Open <b>Settings</b> (bottom of the left menu, or the <b>⚙</b> on mobile). Three things turn the
+app on. Do them in order and you'll get value from your very first day.</p>
+<ol class="steps">
+  <li><b>Connect Google Health.</b> This is what fills the app with your real steps, heart rate,
+  sleep, workouts and body measurements. It's a one-time sign-in — see below.</li>
+  <li><b>Choose the model that powers your coach.</b> Connect a ChatGPT subscription, paste an API
+  key for any provider, or run a fully private local model.</li>
+  <li><b>Fill in your profile.</b> Sex, height, weight and goals let the app personalise your
+  calorie and macro targets and let the coach tailor its advice.</li>
+</ol>
+
+<h3>1 · Settings → Integrations → Connect Google Health</h3>
+<div class="shot">
+  <img src="guide/settings-integrations.png" alt="Settings, Integrations tab, with the Connect Google Health button." />
+  <span class="pin" style="left:31.2%;top:15.4%">1</span>
+  <span class="pin" style="left:51.8%;top:34%">2</span>
+  <span class="pin" style="left:64.9%;top:46.2%">3</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>The eight Settings tabs.</b> Everything you can configure lives here — we cover each one below.</li>
+  <li><span class="n">2</span><b>Connection status.</b> Shows whether HealthTrack is linked to Google Health yet.</li>
+  <li><span class="n">3</span><b>Connect Google Health.</b> Tap, sign in once, and your dashboard fills in. Until you do, the app runs on demo data.</li>
+</ol>
+
+<h3>2 · Settings → AI Assistant → pick your coach's brain</h3>
+<div class="shot">
+  <img src="guide/settings-ai.png" alt="Settings, AI Assistant tab, showing primary and secondary model pickers and provider cards." />
+  <span class="pin" style="left:50.1%;top:24.3%">1</span>
+  <span class="pin" style="left:51.3%;top:31.4%">2</span>
+  <span class="pin" style="left:52.8%;top:60%">3</span>
+  <span class="pin" style="left:50.1%;top:85.9%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Primary model.</b> The model used for every coach reply and for reading your meal photos. A capable cloud model gives the best coaching.</li>
+  <li><span class="n">2</span><b>Secondary (fallback).</b> Used automatically if the primary is unavailable — handy belt-and-braces.</li>
+  <li><span class="n">3</span><b>ChatGPT (Subscription).</b> Sign in with your existing ChatGPT Plus/Pro account using a one-time code — no API key, no extra bill.</li>
+  <li><span class="n">4</span><b>Ollama (Local).</b> Run a model entirely on your own hardware for total privacy. Other options: an OpenAI / Gemini / Anthropic / OpenRouter API key.</li>
+</ol>
+<div class="tip"><b>One thing to know:</b> reading <i>food photos</i> needs a vision-capable model. If you
+pick a text-only local model as your primary, set a vision-capable secondary so photo logging still
+works.</div>
+
+<h3>3 · Settings → Profile → tell the app about you</h3>
 <figure>
-  <img src="guide/today.png" alt="The HealthTrack Daily dashboard showing steps, sleep, heart and recovery." />
-  <figcaption>The Daily screen — your whole day at a glance.</figcaption>
+  <img src="guide/settings-profile.png" alt="Settings Profile tab with a body snapshot, daily targets, and a details form." />
+  <figcaption>Your details drive a live BMI snapshot and personalised calorie, macro and water targets.</figcaption>
 </figure>
-<p>A few things to notice:</p>
+<p>Set your <b>biological sex, date of birth, height, current weight, activity level and goal</b>
+(lose / maintain / gain, with a weekly rate). The app turns these into daily calorie and macronutrient
+targets you'll see on Daily, Food and Trends. The optional <b>conditions</b> field (e.g. diabetes,
+high cholesterol) lets the coach keep its advice relevant and conservative.</p>
+<p>That's the essential setup. The remaining tabs — Intelligence, Telegram, Sharing, Preferences and
+Data &amp; Storage — are all optional and explained next.</p>
+
+<!-- ============================ SETTINGS ============================ -->
+<h2 id="settings">Every setting, explained</h2>
+<p>Settings has eight tabs. You've met the first three; here's what the rest do.</p>
+
+<p class="eyebrow">Profile · Integrations · AI Assistant</p>
+<p>Covered in <a href="#quickstart">Start here</a> above: your body details and targets, the Google
+Health connection, and the model that powers your coach.</p>
+
+<p class="eyebrow" id="set-intelligence">Intelligence — the coach's background brain</p>
+<div class="shot">
+  <img src="guide/settings-intelligence.png" alt="Settings Intelligence tab with an on/off switch, schedule, aggressiveness, and per-tier model pickers." />
+</div>
+<p>When this is on, once a night the coach quietly reviews your week and month — activity, sleep,
+habits, food and labs — and writes a <b>Wellbeing</b> reflection (you'll find it under Journal). The
+basic review is deterministic and free. If you want it to also <i>distil durable memories</i> about
+you, point it at a cheap or local model:</p>
 <ul>
-  <li><span class="pill p-act">Movement</span> steps, active minutes and calories against your daily goals.</li>
-  <li><span class="pill p-heart">Recovery</span> a <b>readiness score</b> (0–100) that blends your heart-rate variability, resting heart rate and sleep versus your own recent baseline.</li>
-  <li><span class="pill p-sleep">Sleep</span> a stage-by-stage view of last night.</li>
-  <li><b>Exercise snacks</b> at the top — small circles for short bursts of brisk movement through the day; tap one when you've done a minute.</li>
+  <li><b>Run at (quiet hour)</b> — the local time the nightly review happens.</li>
+  <li><b>How readily it forms memories</b> — conservative keeps only durable facts; eager also notes emerging tendencies.</li>
+  <li><b>Tier-1 / Tier-2 models</b> — Tier-1 is a cheap/local first pass; Tier-2 (optional) refines it. Use a small model here, separate from your main coach.</li>
+  <li><b>Background activity</b> — a full, plain-English log of every run, what it did and a rough token estimate. Nothing is a black box.</li>
 </ul>
-<div class="tip"><b>Tip:</b> the short notes under each section only appear when something's worth your
-attention — a quiet day stays quiet on purpose.</div>
 
-<h2 id="log">Logging anything — three easy ways</h2>
-<p>You rarely have to fill in a form. There are three ways to record what you eat, drink, or do:</p>
-<h3>1 · The Food screen</h3>
-<p>Snap a photo of a meal, scan a barcode, search a food, or just describe it — HealthTrack estimates
-the calories and macros and logs it for you.</p>
-<figure>
-  <img src="guide/food.png" alt="The Food screen with photo, barcode, search and describe options." />
-  <figcaption>Photograph a meal, scan a barcode, or describe it in words.</figcaption>
-</figure>
-<h3>2 · The "+ Log" button</h3>
-<p>The <b>+ Log</b> button (bottom-right on every screen) is a quick menu for activity, hydration,
-weight, blood pressure, glucose and more — tap, type a number, done.</p>
-<h3>3 · Just tell your coach</h3>
-<p>Type <i>"logged a 30-minute walk"</i> or <i>"2 glasses of water"</i> to your coach and it records it
-— the same as if you'd filled in a form. More on that next.</p>
+<p class="eyebrow" id="set-telegram">Telegram — coach + nudges in your pocket</p>
+<div class="shot">
+  <img src="guide/settings-telegram.png" alt="Settings Telegram tab with a bot-token field and a proactive-nudges toggle." />
+</div>
+<p>Pair a Telegram bot and you can chat with the same coach, log workouts, food and water, and pull
+your metrics — all from Telegram. Message <b>@BotFather</b> in Telegram, run <code>/newbot</code>,
+and paste the token it gives you. Below that, <b>Proactive nudges</b> (opt-in) sends gentle reminders
+when you're falling behind on your goals or habits, plus a short daily report.</p>
+<div class="tip warn"><b>Privacy note:</b> Telegram messages are not end-to-end encrypted — don't send
+anything there you wouldn't put in a normal chat. The bot only answers people you've paired.</div>
 
-<h2 id="coach">Your AI coach</h2>
-<p>The <b>Coach</b> is the heart of HealthTrack. Ask it anything about your health and it answers using
-<i>your</i> numbers — trends, sleep, workouts, labs, medications. It can also log things for you, and
-its advice is grounded in published guidance, kept conservative, and always defers medical decisions to
-your clinician.</p>
-<figure>
-  <img src="guide/coach.png" alt="The Coach screen with suggested questions and a message box." />
-  <figcaption>Ask in plain language — or tap a suggestion to start.</figcaption>
-</figure>
-<p>Try things like <i>"How is my weight trending?"</i>, <i>"Is my resting heart rate creeping up?"</i>,
-or <i>"What should I eat after this workout?"</i> You can also talk to it — tap the microphone — and it
-remembers useful context about you between conversations.</p>
-<div class="tip"><b>Good to know:</b> the coach runs on the AI model you choose in Settings. A larger
-cloud model gives the best answers; you can also run a fully private local model. Either way, your
-health data stays on your own machine.</div>
+<p class="eyebrow" id="set-sharing">Sharing — let a partner or family member in</p>
+<div class="shot">
+  <img src="guide/settings-sharing.png" alt="Settings Sharing tab explaining it uses the same Telegram bot." />
+</div>
+<p>Sharing lets specific, approved people reach your coach through the same Telegram bot — useful for a
+partner, parent or anyone helping look after your health. You choose exactly who, and what they can
+see. (Set up Telegram first, since sharing uses the same bot.)</p>
 
-<h2 id="trends">Trends — the bigger picture</h2>
-<p>The <b>Trends</b> screen zooms out to weeks and months: steps, weight, resting heart rate, sleep,
-HRV and more, each as a clean chart with your goal lines overlaid. Switch between week, month, and
-longer ranges to see where things are heading — and get a short written summary of the current week or
-month on request.</p>
-<figure>
-  <img src="guide/trends.png" alt="The Trends screen with charts for steps, weight, heart rate and more." />
-  <figcaption>Your metrics over time, with goals overlaid.</figcaption>
-</figure>
-
-<h2 id="track">Goals, habits &amp; medications</h2>
-<p>Three more places worth a visit from the sidebar:</p>
+<p class="eyebrow" id="set-preferences">Preferences — the small comforts</p>
+<div class="shot">
+  <img src="guide/settings-preferences.png" alt="Settings Preferences tab: theme, auto-refresh, timezone, medication supply tracking." />
+</div>
 <ul>
-  <li><b>Goals</b> — set targets that matter to you (weight, steps, resting heart rate, key lab numbers). They show up on Daily and Trends and your coach treats them as the bar to hit.</li>
-  <li><b>Habits</b> — build your own "do more" or "do less" habits (read 10 minutes, limit coffee), with streaks and progress.</li>
-  <li><b>Meds</b> — track medications and supplements with reminders and adherence; your coach factors them into timing advice (never dosing).</li>
+  <li><b>Theme mode</b> — light or dark.</li>
+  <li><b>Auto refresh</b> — how often the app quietly re-syncs your data in the background (e.g. every 5 minutes).</li>
+  <li><b>Timezone</b> — the zone your health data is mapped into, so days line up correctly.</li>
+  <li><b>Medication supply tracking</b> — count pills down as you take them and remind you to refill when you're low.</li>
 </ul>
 
-<h2 id="settings">Settings — connect your data &amp; pick your coach</h2>
-<p>Open <b>Settings</b> to set everything up. The two that matter most are under their own tabs:</p>
+<p class="eyebrow" id="set-data">Data &amp; Storage — your history, your machine</p>
+<div class="shot">
+  <img src="guide/settings-archive.png" alt="Settings Data and Storage tab: local archive, one-year sync, storage path and privacy policy." />
+</div>
+<p>Days older than three days are cached in a local database (<code>archive.db</code>) so your Trends
+and Records load instantly without slow round-trips to Google. Use <b>Synchronize 1-Year History</b>
+once to back-fill a full year. The bottom line — restated here in black and white — is that your data
+never leaves this machine except for the calls to the AI provider you chose.</p>
+
+<!-- ============================ SCREENS ============================ -->
+<h2 id="screens">Your screens, one by one</h2>
+<p>The left menu (a bottom bar on phones) moves between screens. Here's what each is for.</p>
+
+<h3>Daily — your whole day at a glance</h3>
+<p>The home screen gathers today into one calm view: movement, workouts, hydration, habits, sleep and
+recovery, each with a plain-English read on how you're doing. The short notes only appear when
+something's worth your attention — a quiet day stays quiet on purpose.</p>
+<div class="shot">
+  <img src="guide/daily.png" alt="The Daily dashboard with steps, workouts, hydration, habits, sleep and recovery." />
+  <span class="pin" style="left:33.7%;top:5.7%">1</span>
+  <span class="pin" style="left:31.9%;top:10.3%">2</span>
+  <span class="pin" style="left:41.2%;top:18.9%">3</span>
+  <span class="pin" style="left:66.9%;top:18.9%">4</span>
+  <span class="pin" style="left:28.2%;top:63.1%">5</span>
+  <span class="pin" style="left:59.8%;top:71.6%">6</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>A note from your coach.</b> An occasional, dismissable prompt — the coach reaching out, not a notification you have to chase.</li>
+  <li><span class="n">2</span><b>Exercise snacks.</b> Each circle is one "breathless minute" of vigorous movement. Do one or several and tap a circle for each minute done.</li>
+  <li><span class="n">3</span><b>Movement.</b> Steps, distance, floors, calories and active-zone minutes against your goals, with a goal streak.</li>
+  <li><span class="n">4</span><b>Workouts.</b> Today's sessions with calories; tap the pencil to relabel or edit one.</li>
+  <li><span class="n">5</span><b>Sleep.</b> Last night stage by stage, with efficiency and total time.</li>
+  <li><span class="n">6</span><b>Recovery.</b> A <b>readiness score</b> (0–100) plus resting heart rate, HRV, SpO₂ and breathing rate. <a href="#bg-readiness">How readiness is worked out →</a></li>
+</ol>
+
+<h3>Fitness — training load and effort over time</h3>
+<div class="shot">
+  <img src="guide/fitness.png" alt="The Fitness screen with exercise snacks, start-a-workout, cardio load, exercise days and a log form." />
+  <span class="pin" style="left:31.9%;top:8.9%">1</span>
+  <span class="pin" style="left:59.8%;top:20%">2</span>
+  <span class="pin" style="left:32.1%;top:36.6%">3</span>
+  <span class="pin" style="left:67.5%;top:34%">4</span>
+  <span class="pin" style="left:78.4%;top:44.9%">5</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Exercise snacks</b> — the same breathless-minute tracker as on Daily.</li>
+  <li><span class="n">2</span><b>Start a workout</b> — pick a type (walk, run, weights, HIIT, yoga, bike…) to begin or plan one.</li>
+  <li><span class="n">3</span><b>Exercise days</b> — how many days you trained this week against your target.</li>
+  <li><span class="n">4</span><b>Cardio load</b> — your training strain trend, so you can build steadily without overdoing it. <a href="#bg-cardio">How it's calculated →</a></li>
+  <li><span class="n">5</span><b>Log a workout</b> — record a session by hand with duration, intensity, exercises and how it felt.</li>
+</ol>
+
+<h3>Trends — the bigger picture</h3>
+<div class="shot">
+  <img src="guide/trends.png" alt="The Trends screen with charts for steps, heart, sleep, energy, weight, nutrition and labs." />
+  <span class="pin" style="left:40.6%;top:3.5%">1</span>
+  <span class="pin" style="left:27.5%;top:24.1%">2</span>
+  <span class="pin" style="left:31.8%;top:39.1%">3</span>
+  <span class="pin" style="left:28%;top:69.9%">4</span>
+  <span class="pin" style="left:28%;top:86%">5</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Range switch</b> — week, month, 3 months or year. A written summary is available on request.</li>
+  <li><span class="n">2</span><b>Movement</b> — steps, active minutes and workouts, with your goal line overlaid.</li>
+  <li><span class="n">3</span><b>Heart &amp; recovery</b> — resting heart rate, HRV and SpO₂ over time.</li>
+  <li><span class="n">4</span><b>Weight &amp; energy</b> — weight alongside calories in vs out.</li>
+  <li><span class="n">5</span><b>Nutrition &amp; labs</b> — protein, carbs, fat, glycemic load and your lab numbers (from Records) trended together.</li>
+</ol>
+
+<h3>Food — log a meal in seconds</h3>
+<div class="shot">
+  <img src="guide/food.png" alt="The Food screen with photo, barcode, search and describe options, plus today's logged meals." />
+  <span class="pin" style="left:41.2%;top:27.3%">1</span>
+  <span class="pin" style="left:49.3%;top:32.2%">2</span>
+  <span class="pin" style="left:41.2%;top:37.5%">3</span>
+  <span class="pin" style="left:41.2%;top:55.9%">4</span>
+  <span class="pin" style="left:65.9%;top:16.2%">5</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Photo</b> — snap or upload a meal; a vision model estimates calories and macros.</li>
+  <li><span class="n">2</span><b>Barcode</b> — scan packaged food for label-accurate numbers (via Open Food Facts).</li>
+  <li><span class="n">3</span><b>Search</b> — look up a food in the USDA database.</li>
+  <li><span class="n">4</span><b>Describe it</b> — just type "two scrambled eggs on toast" and let the coach estimate.</li>
+  <li><span class="n">5</span><b>Logged meals</b> — today's entries with calories, macros and glycemic load; each is editable.</li>
+</ol>
+
+<h3>Habits — build the good ones, limit the rest</h3>
 <figure>
-  <img src="guide/settings.png" alt="The Settings screen showing Integrations and Connect Google Health." />
-  <figcaption>Settings → Integrations → Connect Google Health.</figcaption>
+  <img src="guide/habits.png" alt="The Habits screen with boost and avoid habits and logging controls." />
+  <figcaption>Create "do more" (boost) or "do less" (avoid) habits — minutes, counts or simple done/slipped.</figcaption>
 </figure>
-<ul>
-  <li><span class="lead-num">1</span> &nbsp;<b>Integrations → Connect Google Health.</b> This brings in your steps, heart rate, sleep, workouts and measurements. A one-time sign-in.</li>
-  <li><span class="lead-num">2</span> &nbsp;<b>AI Assistant → choose your coach's model.</b> Connect a ChatGPT subscription with a one-time code, paste an API key for any provider, or use the bundled local model. A cloud model is recommended for the best coaching.</li>
-</ul>
-<p>Other tabs let you set your profile, turn on Telegram reminders, manage what you share, and control
-background "intelligence" — all optional.</p>
+<p>Each habit tracks a streak and shows on Daily. Use <b>+ New habit</b> to add your own — read ten
+minutes, keep coffee under two cups, and so on. Your coach treats your habits as part of the picture.</p>
 
+<h3>Goals — the targets you're working toward</h3>
+<div class="shot">
+  <img src="guide/goals.png" alt="The Goals screen with device goals and lab-backed goals showing met, on-track and needs-attention states." />
+  <span class="pin" style="left:90.9%;top:7.5%">1</span>
+  <span class="pin" style="left:34.2%;top:20.1%">2</span>
+  <span class="pin" style="left:34.3%;top:45%">3</span>
+  <span class="pin" style="left:33.7%;top:69.9%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Add a goal</b> — set your own targets for what matters to you.</li>
+  <li><span class="n">2</span><b>Device goals</b> — weight, steps, resting heart rate, sleep; progress bars show <i>Met</i> at a glance.</li>
+  <li><span class="n">3</span><b>Needs attention</b> — a target you're drifting from is flagged, not hidden.</li>
+  <li><span class="n">4</span><b>Lab-backed goals</b> — HbA1c, LDL, glucose and more, pulled straight from your uploaded lab results in Records.</li>
+</ol>
+
+<h3>Meds — never miss a critical dose</h3>
+<div class="shot">
+  <img src="guide/meds.png" alt="The Medications screen with a weekly pill box, reminders toggle and medication cards." />
+  <span class="pin" style="left:59.8%;top:9.8%">1</span>
+  <span class="pin" style="left:35.5%;top:30.7%">2</span>
+  <span class="pin" style="left:89.4%;top:35%">3</span>
+  <span class="pin" style="left:91.9%;top:39.9%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>This week's pill box</b> — a grid of every dose by day and time; taken, due, missed and upcoming at a glance.</li>
+  <li><span class="n">2</span><b>Reminders</b> — opt-in dose reminders, on a separate clock from the rest of the app.</li>
+  <li><span class="n">3</span><b>Add medication</b> — name, strength, schedule and whether it's critical or taken with food.</li>
+  <li><span class="n">4</span><b>Info</b> — a plain-language research note for each drug, decoded from official sources (never invented). Your coach factors timing in — never dosing.</li>
+</ol>
+
+<h3>Coach — the heart of HealthTrack</h3>
+<p>Ask anything about your health and the coach answers using <i>your</i> numbers — trends, sleep,
+workouts, labs, medications. Its advice is grounded in published guidance, kept conservative, and
+always defers medical decisions to your clinician.</p>
+<div class="shot">
+  <img src="guide/coach.png" alt="The Coach screen showing a question and a detailed answer that references the user's own data." />
+  <span class="pin" style="left:64.8%;top:18.1%">1</span>
+  <span class="pin" style="left:46.2%;top:32.9%">2</span>
+  <span class="pin" style="left:45%;top:88.5%">3</span>
+  <span class="pin" style="left:93.7%;top:93.9%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Your question</b> — ask in plain language: "How's my weight trending?", "Is my resting heart rate creeping up?"</li>
+  <li><span class="n">2</span><b>The answer</b> — specific to you, citing your actual figures, with a practical next step.</li>
+  <li><span class="n">3</span><b>Ask anything</b> — type here, or tap the microphone to talk to it.</li>
+  <li><span class="n">4</span><b>+ Log</b> — the coach can record things for you; more in <a href="#logging">Logging anything</a>.</li>
+</ol>
+
+<h3>Journal — everything you've logged, in one place</h3>
+<figure>
+  <img src="guide/journal.png" alt="The Journal screen with a unified, filterable timeline of workouts, food, water and measurements." />
+  <figcaption>A single timeline of workouts, food, water, vitals and habits — filter by type, edit anything.</figcaption>
+</figure>
+<p>Switch to the <b>Wellbeing</b> tab to read the coach's own reflection on how you're doing — written
+quietly in the background (see <a href="#bg-reflection">below</a>).</p>
+<figure>
+  <img src="guide/journal-wellbeing.png" alt="The Wellbeing tab of the Journal with a five-domain audit and a written reflection." />
+  <figcaption>Journal → Wellbeing: a five-domain audit (movement, sleep, consistency, nutrition, cardiometabolic) and a short written reflection.</figcaption>
+</figure>
+
+<h3>Records — your labs and reports</h3>
+<div class="shot">
+  <img src="guide/records.png" alt="The Records screen with an upload zone and a parsed lab report showing values, ranges and flags." />
+  <span class="pin" style="left:59.8%;top:17%">1</span>
+  <span class="pin" style="left:26.6%;top:25.6%">2</span>
+  <span class="pin" style="left:53.9%;top:42.4%">3</span>
+  <span class="pin" style="left:28.8%;top:77.7%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Upload</b> — drop in a PDF, photo or text of a lab result or report; it's parsed and stored only on this device.</li>
+  <li><span class="n">2</span><b>Reports / Trends</b> — read a single report, or watch a single marker move across reports over time.</li>
+  <li><span class="n">3</span><b>Results with ranges</b> — every value sits next to its reference range, with out-of-range markers flagged.</li>
+  <li><span class="n">4</span><b>AI summary</b> — a plain-language read of the report; the coach uses these to personalise its guidance.</li>
+</ol>
+
+<h3>Memory — what the coach remembers about you</h3>
+<div class="shot">
+  <img src="guide/memory.png" alt="The Memory screen listing durable facts the coach has learned, with categories and sources." />
+  <span class="pin" style="left:33.6%;top:15.9%">1</span>
+  <span class="pin" style="left:31.3%;top:36.1%">2</span>
+  <span class="pin" style="left:53.9%;top:45%">3</span>
+  <span class="pin" style="left:30.7%;top:57%">4</span>
+</div>
+<ol class="calls">
+  <li><span class="n">1</span><b>Have the coach ask you something</b> — invite it to learn one useful thing about you.</li>
+  <li><span class="n">2</span><b>Add a memory</b> — record a durable fact yourself and tag its category.</li>
+  <li><span class="n">3</span><b>A saved memory</b> — a preference, routine, goal or constraint the coach will carry into every conversation.</li>
+  <li><span class="n">4</span><b>Where it came from</b> — chat, a question it asked, or something it noticed in review. You own all of it: pin, edit or delete anything.</li>
+</ol>
+
+<!-- ============================ BACKGROUND ============================ -->
+<h2 id="background">What happens in the background</h2>
+<p>A lot of HealthTrack's value is quiet. Here's the work it does without being asked.</p>
+
+<h3 id="bg-readiness">Your readiness score</h3>
+<p>Google doesn't provide a readiness number, so HealthTrack derives one. Each morning it compares last
+night's <b>heart-rate variability</b>, <b>resting heart rate</b> and <b>sleep</b> against <i>your own</i>
+rolling two-week baseline. When they're better than usual you score high; when they're worse, it dips —
+a nudge to take it easier. It's tuned to be read as a <i>trend</i>, not an exact figure, and it's built
+on the same physiology that WHOOP and Oura use.</p>
+
+<h3 id="bg-cardio">Cardio load</h3>
+<p>Also not in the Google data, so it's computed in-app from how hard and how long your heart works
+during activity (heart rate relative to your resting rate, weighted toward recent days). Watching the
+trend — and the balance between this week and your recent average — helps you build fitness steadily
+without spiking into overtraining.</p>
+
+<h3 id="bg-reflection">The nightly reflection &amp; growing memory</h3>
+<p>If you switch on <a href="#set-intelligence">Intelligence</a>, once a night the coach reviews your
+week and month and writes the <b>Wellbeing</b> reflection you read in the Journal — a five-domain audit
+plus a short narrative and a few suggested actions. With a model attached it can also distil <b>durable
+memories</b> about you (under guard-rails you control), which then show up on the Memory page labelled
+"noticed in review". Every run is logged in plain English in Settings → Intelligence.</p>
+
+<h3>Proactive nudges &amp; reminders</h3>
+<p>With Telegram paired and nudges enabled, the coach reaches out when you're drifting from your goals
+or habits, and can send a short daily report. You can also ask it to remind you of anything —
+"remind me to take my evening walk at 6" — and it will, both in-app and on Telegram. Reminders you set
+this way are one-offs that fire exactly when asked.</p>
+
+<h3>The coach is also your logger</h3>
+<p>You rarely need a form. Telling the coach "logged a 30-minute walk", "two glasses of water" or
+"had oatmeal for breakfast" records it the same as if you'd filled one in — see below.</p>
+
+<h3>Tidying your workouts &amp; caching your history</h3>
+<p>When a watch and phone both record the same session, HealthTrack merges the overlapping entries into
+one so your day isn't double-counted. And, as noted under <a href="#set-data">Data &amp; Storage</a>,
+older days are cached locally so Trends and Records open instantly.</p>
+
+<!-- ============================ LOGGING ============================ -->
+<h2 id="logging">Three ways to log anything</h2>
+<p>However you prefer to work, recording something is quick:</p>
+<ul>
+  <li><span class="pill p-food">Food screen</span> photograph a meal, scan a barcode, search, or describe it in words.</li>
+  <li><span class="pill p-act">+ Log button</span> the floating button (bottom-right on every screen) is a quick menu for activity, hydration, weight, blood pressure, glucose and more — tap, type a number, done.</li>
+  <li><span class="pill p-breath">Tell your coach</span> type or speak it in plain language and the coach records it for you.</li>
+</ul>
+
+<!-- ============================ INSTALL ============================ -->
 <h2 id="install">Install it on your phone &amp; computer</h2>
 <p>HealthTrack installs like a normal app — no app store needed:</p>
 <div class="card">
@@ -178,9 +464,9 @@ background "intelligence" — all optional.</p>
   <p><b>Computer:</b> open it in Chrome or Edge and click the <b>install icon</b> in the address bar.</p>
   <p style="margin-bottom:0">It then opens full-screen with its own icon and stays signed in.</p>
 </div>
-<div class="tip"><b>If a screen won't load away from home:</b> make sure the Tailscale app is running and
-signed in on that device — it's what privately and securely connects you to your HealthTrack. Your
-setup contact can help if you're unsure.</div>
+<div class="tip warn"><b>If a screen won't load away from home:</b> make sure the Tailscale app is
+running and signed in on that device — it's what privately and securely connects you to your
+HealthTrack. Your setup contact can help if you're unsure.</div>
 
 <footer>
   HealthTrack — your body, beautifully measured. Everything here stays on your own machine.

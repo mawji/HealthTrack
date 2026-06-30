@@ -2,7 +2,10 @@ import fs from "fs";
 import path from "path";
 
 // Single-user local app: persistence is plain JSON files under data/.
-const DATA_DIR = path.join(process.cwd(), "data");
+// HEALTHTRACK_DATA_DIR overrides the location so a second instance (e.g. a
+// disconnected demo server for screenshots/guides) can run against an isolated
+// data dir without touching the primary install. Defaults to <cwd>/data.
+const DATA_DIR = process.env.HEALTHTRACK_DATA_DIR || path.join(process.cwd(), "data");
 
 export function dataPath(...parts: string[]) {
   return path.join(DATA_DIR, ...parts);

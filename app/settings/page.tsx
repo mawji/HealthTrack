@@ -1319,7 +1319,7 @@ export default function Settings() {
               className={`settings-tab-btn ${activeTab === "intelligence" ? "active" : ""}`}
               onClick={() => selectTab("intelligence")}
             >
-              <span>🌙</span> Intelligence
+              <span>✨</span> Intelligence
             </button>
             <button
               className={`settings-tab-btn ${activeTab === "telegram" ? "active" : ""}`}

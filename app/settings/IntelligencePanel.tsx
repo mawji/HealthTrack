@@ -182,7 +182,7 @@ export default function IntelligencePanel() {
   );
 }
 
-function TierPicker({ label, tierKey, tier, methods, models, busy, test, onChange, onTest }: {
+function TierPicker({ label, tier, methods, models, busy, test, onChange, onTest }: {
   label: string; tierKey: string; tier: Tier | null;
   methods: Method[]; models: Record<string, string[]>; busy: boolean; test?: string;
   onChange: (t: Tier | null) => void; onTest: (t: Tier | null) => void;
@@ -190,7 +190,11 @@ function TierPicker({ label, tierKey, tier, methods, models, busy, test, onChang
   const method = tier?.method ?? "";
   const model = tier?.model ?? "";
   const opts = method ? (models[method] ?? []) : [];
-  const listId = `models-${tierKey}`;
+  // Always show every model for the method (a native select doesn't filter by the
+  // current value the way a datalist does); include the current model if it isn't
+  // in the live list, plus a Custom… escape hatch for ids the provider can't list.
+  const allOpts = Array.from(new Set([...opts, ...(model && !opts.includes(model) ? [model] : [])]));
+  const [custom, setCustom] = useState(false);
 
   return (
     <div style={{ background: "var(--bg-inset)", padding: "14px 16px", borderRadius: 14, border: "1px solid var(--hairline)" }}>
@@ -200,7 +204,7 @@ function TierPicker({ label, tierKey, tier, methods, models, busy, test, onChang
           <label style={{ fontSize: 11.5, color: "var(--ink-soft)", fontWeight: 600 }}>Method</label>
           <select className="field" style={{ minWidth: 180, padding: "6px 10px", borderRadius: 8, fontSize: 13 }}
             value={method} disabled={busy}
-            onChange={(e) => { const m = e.target.value; onChange(m ? { method: m, model: (models[m] ?? [])[0] ?? "" } : null); }}>
+            onChange={(e) => { const m = e.target.value; setCustom(false); onChange(m ? { method: m, model: (models[m] ?? [])[0] ?? "" } : null); }}>
             <option value="">None</option>
             {methods.map((m) => (
               <option key={m.type} value={m.type}>{m.label}{m.configured ? "" : " (not set up)"}</option>
@@ -209,13 +213,19 @@ function TierPicker({ label, tierKey, tier, methods, models, busy, test, onChang
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 180 }}>
           <label style={{ fontSize: 11.5, color: "var(--ink-soft)", fontWeight: 600 }}>Model</label>
-          <input className="field" list={listId} placeholder={method ? "pick or type a model id" : "choose a method first"}
-            value={model} disabled={busy || !method}
-            onChange={(e) => method && onChange({ method, model: e.target.value })}
-            style={{ padding: "6px 10px", borderRadius: 8, fontSize: 13 }} />
-          <datalist id={listId}>
-            {opts.map((o) => <option key={o} value={o} />)}
-          </datalist>
+          {custom ? (
+            <input className="field" autoFocus placeholder="type a model id" value={model} disabled={busy || !method}
+              onChange={(e) => method && onChange({ method, model: e.target.value })}
+              style={{ padding: "6px 10px", borderRadius: 8, fontSize: 13 }} />
+          ) : (
+            <select className="field" value={model} disabled={busy || !method}
+              onChange={(e) => { if (e.target.value === "__custom__") { setCustom(true); } else if (method) onChange({ method, model: e.target.value }); }}
+              style={{ padding: "6px 10px", borderRadius: 8, fontSize: 13 }}>
+              {!model && <option value="">{method ? "pick a model" : "choose a method first"}</option>}
+              {allOpts.map((o) => <option key={o} value={o}>{o}</option>)}
+              {method && <option value="__custom__">Custom…</option>}
+            </select>
+          )}
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: "7px 12px" }} disabled={busy || !method || !model}
           onClick={() => onTest(tier)}>Test</button>

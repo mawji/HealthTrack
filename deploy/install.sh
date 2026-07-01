@@ -14,7 +14,7 @@ set -euo pipefail
 OWNER="${GHCR_OWNER:-mawji}"
 BRANCH="${HT_BRANCH:-main}"
 RAW="https://raw.githubusercontent.com/${OWNER}/HealthTrack/${BRANCH}/deploy"
-DIR="${HOME}/healthtrack"
+DIR="$(pwd)"   # install in the current folder; override with --dir
 START=1
 CHANNEL="stable"
 PROFILE=()
@@ -59,9 +59,16 @@ if [ -f .env ]; then
   say "Using existing .env (delete it to reconfigure)"
 else
   cp .env.example .env
-  if [ -t 0 ]; then
+  # generated / fixed values first, so the .env is usable even if we can't prompt
+  TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  setkv WATCHTOWER_TOKEN "$TOKEN"
+  setkv GHCR_OWNER "$OWNER"
+  setkv CHANNEL "$CHANNEL"
+  # `curl | bash` makes stdin the download pipe, so gate prompting on the terminal
+  # (/dev/tty), not stdin — otherwise it can never ask.
+  if [ -t 0 ] || { : </dev/tty; } 2>/dev/null; then
     say "Enter your settings (Enter keeps the [default]; optional ones can be blank)"
-    ask(){ local v; read -r -p "$2${3:+ [$3]}: " v </dev/tty || true; setkv "$1" "${v:-$3}"; }
+    ask(){ local def="${3:-}" v=""; read -r -p "$2${def:+ [$def]}: " v </dev/tty || true; setkv "$1" "${v:-$def}"; }
     ask GOOGLE_HEALTH_CLIENT_ID     "Google Health client ID"
     ask GOOGLE_HEALTH_CLIENT_SECRET "Google Health client secret"
     ask APP_TZ                      "Timezone (IANA)" "Asia/Dubai"
@@ -69,15 +76,11 @@ else
     ask TS_AUTHKEY                  "Tailscale auth key"
     ask TELEGRAM_BOT_TOKEN          "Telegram bot token (optional, blank to skip)"
   else
-    warn "Not an interactive shell — wrote $DIR/.env from the template."
-    warn "Fill it in, then re-run:  cd $DIR && ./install.sh"
+    warn "No terminal available for prompts — wrote $DIR/.env from the template."
+    warn "Edit it (GOOGLE_HEALTH_*, APP_TZ, TS_HOSTNAME, TS_AUTHKEY), then re-run the"
+    warn "installer from this folder:  cd \"$DIR\" && bash <(curl -fsSL $RAW/install.sh)"
     exit 1
   fi
-  # generated / fixed values
-  TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  setkv WATCHTOWER_TOKEN "$TOKEN"
-  setkv GHCR_OWNER "$OWNER"
-  setkv CHANNEL "$CHANNEL"
 fi
 
 if [ "$START" -eq 0 ]; then
